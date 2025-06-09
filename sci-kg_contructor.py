@@ -2,12 +2,12 @@ from neo4j import GraphDatabase
 import pandas as pd
 
 # Neo4j connection details
-uri = "bolt://localhost:7687"
-user = "neo4j"
-password = "lFz_YZwb8Ht8D65WJT_lFExW9HDzBGPeNgqQovarK5k"
+uri = "Put your URL here"
+user = "Put your Neo4j Username here"
+password = "Put your Neo4j password here"
 
 # Load your CSV file
-csv_path = "E3SM.sif default node.csv"
+csv_path = "File Path"
 df = pd.read_csv(csv_path).fillna('')  # Replace NaNs with empty string
 
 # Connect to Neo4j
