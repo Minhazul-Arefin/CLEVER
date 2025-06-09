@@ -2,7 +2,7 @@ import os
 import requests
 
 # Define folder paths
-fortran_folder_path = "/home/minhaz/Desktop/Code/GraphRAG/Working F90"
+fortran_folder_path = "Enter your fortran files path here"
 txt_output_path = "math.txt"
 
 # LM Studio API endpoint
