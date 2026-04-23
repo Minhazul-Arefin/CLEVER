@@ -149,7 +149,7 @@ ALLOWED_RELATIONS = {
 }
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENROUTER_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+OPENROUTER_MODEL = "openrouter/free"
 OPENROUTER_SITE_URL = "https://streamlit.io"
 OPENROUTER_SITE_NAME = "CLEVER"
 
