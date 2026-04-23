@@ -30,6 +30,12 @@ st.markdown(
         padding-bottom: 2rem;
         max-width: 1500px;
     }
+    .panel {
+        border: 1px solid #e6e9ef;
+        border-radius: 16px;
+        padding: 0.9rem 1rem;
+        background: #ffffff;
+    }
     .metric-card {
         border: 1px solid #e6e9ef;
         border-radius: 12px;
@@ -55,6 +61,11 @@ st.markdown(
         background: #fbfdff;
         line-height: 1.7;
         white-space: pre-wrap;
+    }
+    .tiny-note {
+        color: #6b7280;
+        font-size: 0.8rem;
+        line-height: 1.5;
     }
     .status-pill {
         display: block;
@@ -89,6 +100,7 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
 
 # ============================================================
 # Constants
@@ -138,16 +150,18 @@ ALLOWED_RELATIONS = {
 
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 GEMINI_MODEL = "gemma-4-26b-a4b-it"
+
 DEFAULT_TIMEOUT_SECONDS = 90
 DEFAULT_CHUNK_SIZE = 2500
 DEFAULT_SYSTEM_NAME = "Sci-KG"
 
 
 # ============================================================
-# Secrets
+# Secrets / env
 # ============================================================
 def get_gemini_api_key() -> str:
-    return st.secrets.get("GEMINI_API_KEY", "").strip()
+    key = st.secrets.get("GEMINI_API_KEY", "").strip()
+    return key
 
 
 # ============================================================
@@ -186,22 +200,7 @@ if "last_health_ok" not in st.session_state:
 # ============================================================
 # Helpers
 # ============================================================
-def gemini_text_from_response(data: dict) -> str:
-    candidates = data.get("candidates", [])
-    if not candidates:
-        raise ValueError(f"No candidates returned. Response: {data}")
-
-    content = candidates[0].get("content", {})
-    parts = content.get("parts", [])
-    texts = [p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p]
-    text = "\n".join([t for t in texts if t]).strip()
-
-    if text:
-        return text
-
-    raise ValueError(f"No text found in Gemini response. Response: {data}")
-
-
+@st.cache_data(ttl=60, show_spinner=False)
 @st.cache_data(ttl=60, show_spinner=False)
 def cached_check_gemini(model: str, api_key: str, timeout: int = 20) -> tuple[bool, str]:
     if not api_key:
@@ -217,15 +216,28 @@ def cached_check_gemini(model: str, api_key: str, timeout: int = 20) -> tuple[bo
     }
 
     try:
-        response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=timeout)
-        if not response.ok:
-            try:
-                return False, f"{response.status_code} {response.json()}"
-            except Exception:
-                return False, f"{response.status_code} {response.text}"
+        response = requests.post(
+            url,
+            headers={"Content-Type": "application/json"},
+            json=payload,
+            timeout=timeout,
+        )
 
-        data = response.json()
-        return True, gemini_text_from_response(data)
+        if response.ok:
+            data = response.json()
+            candidates = data.get("candidates", [])
+            if not candidates:
+                return False, f"No candidates returned: {data}"
+            parts = candidates[0].get("content", {}).get("parts", [])
+            text = "\n".join([p.get("text", "") for p in parts if isinstance(p, dict)]).strip()
+            return True, text or "OK"
+
+        try:
+            err = response.json()
+            return False, f"{response.status_code} {err}"
+        except Exception:
+            return False, f"{response.status_code} {response.text}"
+
     except Exception as exc:
         return False, str(exc)
 
@@ -255,8 +267,9 @@ def safe_json_load(text: str) -> dict:
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start != -1 and end != -1 and end > start:
-            return json.loads(cleaned[start:end + 1])
-        raise ValueError("Could not parse JSON from model response.")
+            candidate = cleaned[start:end + 1]
+            return json.loads(candidate)
+        raise ValueError("Could not parse JSON from LLM response.")
 
 
 def canonical_text(value: str) -> str:
@@ -386,9 +399,6 @@ def graph_context_text(graph: GraphData, limit_nodes: int = 220, limit_edges: in
     return json.dumps({"nodes": nodes, "edges": edges}, indent=2)
 
 
-# ============================================================
-# Placeholder graph
-# ============================================================
 def sample_placeholder_graph() -> GraphData:
     nodes = pd.DataFrame([
         {"id": "sys_scikg", "label": "Sci-KG", "type": "System", "x": -0.15, "y": 0.95, "z": -0.25},
@@ -504,7 +514,11 @@ def build_nx_graph(graph: GraphData, low_contrast: bool = False) -> nx.Graph:
             )
         graph_nx.add_node(str(row["id"]), **attrs)
     for _, row in graph.edges.iterrows():
-        graph_nx.add_edge(str(row["source"]), str(row["target"]), relation=str(row["relation"]))
+        graph_nx.add_edge(
+            str(row["source"]),
+            str(row["target"]),
+            relation=str(row["relation"]),
+        )
     return graph_nx
 
 
@@ -529,7 +543,12 @@ def get_graph_positions(graph_nx: nx.Graph) -> dict:
     return nx.spring_layout(graph_nx, dim=3, seed=12, k=1.35, iterations=200)
 
 
-def render_3d_graph(graph_nx: nx.Graph, highlight_nodes=None, highlight_edges=None, placeholder_mode: bool = False):
+def render_3d_graph(
+    graph_nx: nx.Graph,
+    highlight_nodes: Optional[set[str]] = None,
+    highlight_edges: Optional[set[tuple[str, str]]] = None,
+    placeholder_mode: bool = False,
+):
     if not PLOTLY_AVAILABLE or go is None:
         return None
 
@@ -550,6 +569,7 @@ def render_3d_graph(graph_nx: nx.Graph, highlight_nodes=None, highlight_edges=No
         x0, y0, z0 = pos[source]
         x1, y1, z1 = pos[target]
         edge_key = tuple(sorted((source, target)))
+
         if edge_key in highlight_edges:
             red_edge_x += [x0, x1, None]
             red_edge_y += [y0, y1, None]
@@ -560,20 +580,38 @@ def render_3d_graph(graph_nx: nx.Graph, highlight_nodes=None, highlight_edges=No
             ash_edge_z += [z0, z1, None]
 
     ash_edge_trace = go.Scatter3d(
-        x=ash_edge_x, y=ash_edge_y, z=ash_edge_z,
+        x=ash_edge_x,
+        y=ash_edge_y,
+        z=ash_edge_z,
         mode="lines",
         line=dict(color="rgba(40,40,40,0.45)", width=4),
-        hoverinfo="none", showlegend=False
-    )
-    red_edge_trace = go.Scatter3d(
-        x=red_edge_x, y=red_edge_y, z=red_edge_z,
-        mode="lines",
-        line=dict(color="rgba(206,40,40,0.95)", width=7),
-        hoverinfo="none", showlegend=False
+        hoverinfo="none",
+        showlegend=False,
     )
 
-    reg_x, reg_y, reg_z, reg_text, reg_colors, reg_sizes = [], [], [], [], [], []
-    hi_x, hi_y, hi_z, hi_text, hi_colors, hi_sizes = [], [], [], [], [], []
+    red_edge_trace = go.Scatter3d(
+        x=red_edge_x,
+        y=red_edge_y,
+        z=red_edge_z,
+        mode="lines",
+        line=dict(color="rgba(206,40,40,0.95)", width=7),
+        hoverinfo="none",
+        showlegend=False,
+    )
+
+    xs = [p[0] for p in pos.values()]
+    ys = [p[1] for p in pos.values()]
+    zs = [p[2] for p in pos.values()]
+    cx = sum(xs) / len(xs)
+    cy = sum(ys) / len(ys)
+    cz = sum(zs) / len(zs)
+
+    reg_x, reg_y, reg_z = [], [], []
+    reg_text, reg_colors, reg_sizes = [], [], []
+    hi_x, hi_y, hi_z = [], [], []
+    hi_text, hi_colors, hi_sizes = [], [], []
+    label_x, label_y, label_z = [], [], []
+    label_text = []
 
     for node, data in graph_nx.nodes(data=True):
         x, y, z = pos[node]
@@ -584,31 +622,77 @@ def render_3d_graph(graph_nx: nx.Graph, highlight_nodes=None, highlight_edges=No
         node_size = 14 if node_type == "System" else (12 if node_type == "Equation" else 8)
 
         if node in highlight_nodes:
-            hi_x.append(x); hi_y.append(y); hi_z.append(z)
-            hi_text.append(hover_text); hi_colors.append(node_color); hi_sizes.append(node_size)
+            hi_x.append(x)
+            hi_y.append(y)
+            hi_z.append(z)
+            hi_text.append(hover_text)
+            hi_colors.append(node_color)
+            hi_sizes.append(node_size)
         else:
-            reg_x.append(x); reg_y.append(y); reg_z.append(z)
-            reg_text.append(hover_text); reg_colors.append(node_color); reg_sizes.append(node_size)
+            reg_x.append(x)
+            reg_y.append(y)
+            reg_z.append(z)
+            reg_text.append(hover_text)
+            reg_colors.append(node_color)
+            reg_sizes.append(node_size)
+
+        dx = x - cx
+        dy = y - cy
+        dz = z - cz
+        norm = (dx**2 + dy**2 + dz**2) ** 0.5
+        if norm == 0:
+            norm = 1.0
+
+        offset = 0.22 if node_type == "System" else (0.18 if node_type == "Equation" else 0.12)
+        label_x.append(x + offset * dx / norm)
+        label_y.append(y + offset * dy / norm)
+        label_z.append(z + offset * dz / norm)
+        label_text.append(label)
 
     regular_trace = go.Scatter3d(
-        x=reg_x, y=reg_y, z=reg_z,
+        x=reg_x,
+        y=reg_y,
+        z=reg_z,
         mode="markers",
         text=reg_text,
         hovertemplate="%{text}<extra></extra>",
-        marker=dict(size=reg_sizes, color=reg_colors, opacity=0.98, line=dict(color="rgba(60,60,60,0.30)", width=1.0)),
-        showlegend=False
+        marker=dict(
+            size=reg_sizes,
+            color=reg_colors,
+            opacity=0.98,
+            line=dict(color="rgba(60,60,60,0.30)", width=1.0),
+        ),
+        showlegend=False,
     )
 
     highlight_trace = go.Scatter3d(
-        x=hi_x, y=hi_y, z=hi_z,
+        x=hi_x,
+        y=hi_y,
+        z=hi_z,
         mode="markers",
         text=hi_text,
         hovertemplate="%{text}<extra></extra>",
-        marker=dict(size=hi_sizes, color=hi_colors, opacity=1.0, line=dict(color="#C81E1E", width=2.3)),
-        showlegend=False
+        marker=dict(
+            size=hi_sizes,
+            color=hi_colors,
+            opacity=1.0,
+            line=dict(color="#C81E1E", width=2.3),
+        ),
+        showlegend=False,
     )
 
-    fig = go.Figure(data=[ash_edge_trace, red_edge_trace, regular_trace, highlight_trace])
+    label_trace = go.Scatter3d(
+        x=label_x,
+        y=label_y,
+        z=label_z,
+        mode="text",
+        text=label_text,
+        textfont=dict(size=12, color="#3F4752"),
+        hoverinfo="none",
+        showlegend=False,
+    )
+
+    fig = go.Figure(data=[ash_edge_trace, red_edge_trace, regular_trace, highlight_trace, label_trace])
     fig.update_layout(
         height=560,
         showlegend=False,
@@ -639,7 +723,14 @@ def render_2d_graph(graph_nx: nx.Graph):
     node_colors = [data.get("color", NODE_COLOR_MAP["Unknown"]) for _, data in graph_nx.nodes(data=True)]
     labels = {node: data.get("label", node) for node, data in graph_nx.nodes(data=True)}
 
-    nx.draw_networkx_edges(graph_nx, pos, ax=ax, alpha=0.35, width=1.6, edge_color="#2f2f2f")
+    nx.draw_networkx_edges(
+        graph_nx,
+        pos,
+        ax=ax,
+        alpha=0.35,
+        width=1.6,
+        edge_color="#2f2f2f",
+    )
     nx.draw_networkx_nodes(graph_nx, pos, ax=ax, node_color=node_colors, node_size=380)
     nx.draw_networkx_labels(graph_nx, pos, labels=labels, ax=ax, font_size=8)
     fig.tight_layout()
@@ -647,7 +738,7 @@ def render_2d_graph(graph_nx: nx.Graph):
 
 
 # ============================================================
-# Gemini client
+# OpenRouter client
 # ============================================================
 class LLMClient:
     def __init__(self, model: str, api_key: str, timeout: int = DEFAULT_TIMEOUT_SECONDS):
@@ -699,7 +790,16 @@ class LLMClient:
                     raise RuntimeError(f"Gemini error {response.status_code}: {err}")
 
                 data = response.json()
-                return gemini_text_from_response(data)
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    raise ValueError(f"No candidates returned by Gemini. Response: {data}")
+
+                parts = candidates[0].get("content", {}).get("parts", [])
+                text = "\n".join([p.get("text", "") for p in parts if isinstance(p, dict)]).strip()
+                if text:
+                    return text
+
+                raise ValueError(f"No text found in Gemini response: {data}")
 
             except Exception as exc:
                 last_error = exc
@@ -792,25 +892,42 @@ summary_eqs = 0
 
 if not summary_graph.nodes.empty:
     summary_files = int(summary_graph.nodes[summary_graph.nodes["type"] == "File"].shape[0])
-    summary_vars = int(summary_graph.nodes[summary_graph.nodes["type"].isin(["Global Variable", "Local Variable", "Constant"])].shape[0])
+    summary_vars = int(
+        summary_graph.nodes[
+            summary_graph.nodes["type"].isin(["Global Variable", "Local Variable", "Constant"])
+        ].shape[0]
+    )
     summary_eqs = int(summary_graph.nodes[summary_graph.nodes["type"] == "Equation"].shape[0])
 
-ok, msg = cached_check_gemini(GEMINI_MODEL, get_gemini_api_key(), 20)
+ok, msg = cached_check_gemini(
+    GEMINI_MODEL,
+    get_gemini_api_key(),
+    20,
+)
 st.session_state.last_health_ok = ok
 st.session_state.last_health_message = msg
 
+
+# ============================================================
+# Fixed defaults
+# ============================================================
 system_name = DEFAULT_SYSTEM_NAME
 
+
+# ============================================================
+# Sidebar
+# ============================================================
 with st.sidebar:
     st.header("CLEVER Settings")
+
     if ok:
         st.markdown(
-            f'<div class="status-pill ok-pill">Gemini online<br>{GEMINI_MODEL}</div>',
+            f'<div class="status-pill ok-pill">Gemma 4 online<br>{GEMINI_MODEL}</div>'
             unsafe_allow_html=True,
         )
     else:
         st.markdown(
-            f'<div class="status-pill warn-pill">Gemini offline<br>{GEMINI_MODEL}</div>',
+            f'<div class="status-pill warn-pill">Gemma 4 offline<br>{GEMINI_MODEL}</div>'
             unsafe_allow_html=True,
         )
         st.caption(msg)
@@ -831,7 +948,7 @@ with st.sidebar:
     with st.expander("Debug"):
         key = get_gemini_api_key()
         st.caption(f"Key loaded: {bool(key)}")
-        st.caption(f"Key prefix: {key[:8] if key else 'N/A'}")
+        st.caption(f"Key prefix: {key[:12] if key else 'N/A'}")
         st.caption(f"Model: {GEMINI_MODEL}")
 
     if st.button("Reset graph", use_container_width=True):
@@ -841,8 +958,15 @@ with st.sidebar:
         st.session_state.chat_answer = ""
         st.rerun()
 
-llm_client = LLMClient(model=GEMINI_MODEL, api_key=get_gemini_api_key())
+llm_client = LLMClient(
+    model=GEMINI_MODEL,
+    api_key=get_gemini_api_key(),
+)
 
+
+# ============================================================
+# Main layout
+# ============================================================
 left_col, right_col = st.columns([0.82, 2.18], gap="small")
 
 with left_col:
@@ -870,7 +994,7 @@ with left_col:
 
     if st.button("Ask CLEVER", use_container_width=True):
         if not llm_client.is_configured():
-            st.error("Gemini is not configured. Add GEMINI_API_KEY to Streamlit secrets.")
+            st.error("Gemma 4 is not configured. Add GEMINI_API_KEY to Streamlit secrets.")
         elif graph_question.strip() == "":
             st.error("Enter a question first.")
         else:
@@ -879,9 +1003,16 @@ with left_col:
                 "You are CLEVER, an agent over a Scientific Knowledge Graph (Sci-KG). "
                 "Use the graph context first. If the graph is insufficient, you may add cautious scientific reasoning and clearly mark it as added knowledge."
             )
-            user_prompt = f"Graph context:\n{context}\n\nUser question: {graph_question}"
+            user_prompt = (
+                "Graph context:\n"
+                f"{context}\n\n"
+                f"User question: {graph_question}"
+            )
             try:
-                st.session_state.chat_answer = llm_client.chat(system_prompt=system_prompt, user_prompt=user_prompt)
+                st.session_state.chat_answer = llm_client.chat(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                )
             except Exception as exc:
                 st.session_state.chat_answer = f"Error: {exc}"
 
@@ -942,11 +1073,15 @@ with right_col:
         fig_2d = render_2d_graph(view_graph)
         st.pyplot(fig_2d, use_container_width=True)
 
+
+# ============================================================
+# Build graph after UI inputs are bound
+# ============================================================
 if build_clicked:
     if not uploaded_files:
         st.error("Upload at least one scientific file.")
     elif not llm_client.is_configured():
-        st.error("Gemini is not configured. Add GEMINI_API_KEY to Streamlit secrets.")
+        st.error("OpenRouter is not configured. Add OPENROUTER_API_KEY to Streamlit secrets.")
     else:
         selected_files = [f for f in uploaded_files if allowed_extension(f.name)][:file_limit]
         if not selected_files:
@@ -994,6 +1129,7 @@ if build_clicked:
                         "seconds": round(time.time() - file_start, 2),
                         "status": f"error: {exc}",
                     })
+
                 progress.progress(idx / max(1, len(selected_files)))
 
             merged = merge_graphs([st.session_state.graph_data] + fragments)
