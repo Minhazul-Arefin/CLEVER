@@ -30,12 +30,6 @@ st.markdown(
         padding-bottom: 2rem;
         max-width: 1500px;
     }
-    .panel {
-        border: 1px solid #e6e9ef;
-        border-radius: 16px;
-        padding: 0.9rem 1rem;
-        background: #ffffff;
-    }
     .metric-card {
         border: 1px solid #e6e9ef;
         border-radius: 12px;
@@ -61,11 +55,6 @@ st.markdown(
         background: #fbfdff;
         line-height: 1.7;
         white-space: pre-wrap;
-    }
-    .tiny-note {
-        color: #6b7280;
-        font-size: 0.8rem;
-        line-height: 1.5;
     }
     .status-pill {
         display: block;
@@ -101,12 +90,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 # ============================================================
 # Constants
 # ============================================================
 SUPPORTED_EXTENSIONS = [
-    ".f90", ".py", ".cpp", ".h", ".json"
+    ".f90", ".f", ".for", ".f95", ".txt", ".py", ".c", ".cpp", ".h", ".hpp", ".json", ".md"
 ]
 
 NODE_COLOR_MAP = {
@@ -148,27 +136,18 @@ ALLOWED_RELATIONS = {
     "related_to",
 }
 
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENROUTER_MODEL = "openrouter/free"
-OPENROUTER_SITE_URL = "https://streamlit.io"
-OPENROUTER_SITE_NAME = "CLEVER"
-
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_MODEL = "gemma-4-26b-a4b-it"
 DEFAULT_TIMEOUT_SECONDS = 90
 DEFAULT_CHUNK_SIZE = 2500
 DEFAULT_SYSTEM_NAME = "Sci-KG"
 
-OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
-
-def get_openrouter_api_key() -> str:
-    return OPENROUTER_API_KEY.strip()
-
 
 # ============================================================
-# Secrets / env
+# Secrets
 # ============================================================
-def get_openrouter_api_key() -> str:
-    key = st.secrets.get("OPENROUTER_API_KEY", "").strip()
-    return key
+def get_gemini_api_key() -> str:
+    return st.secrets.get("GEMINI_API_KEY", "").strip()
 
 
 # ============================================================
@@ -207,36 +186,46 @@ if "last_health_ok" not in st.session_state:
 # ============================================================
 # Helpers
 # ============================================================
-@st.cache_data(ttl=60, show_spinner=False)
-def cached_check_openrouter(base_url: str, model: str, api_key: str, timeout: int = 20) -> tuple[bool, str]:
-    if not api_key:
-        return False, "Missing OPENROUTER_API_KEY in Streamlit secrets."
+def gemini_text_from_response(data: dict) -> str:
+    candidates = data.get("candidates", [])
+    if not candidates:
+        raise ValueError(f"No candidates returned. Response: {data}")
 
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": OPENROUTER_SITE_URL,
-        "X-OpenRouter-Title": OPENROUTER_SITE_NAME,
-    }
+    content = candidates[0].get("content", {})
+    parts = content.get("parts", [])
+    texts = [p.get("text", "") for p in parts if isinstance(p, dict) and "text" in p]
+    text = "\n".join([t for t in texts if t]).strip()
+
+    if text:
+        return text
+
+    raise ValueError(f"No text found in Gemini response. Response: {data}")
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def cached_check_gemini(model: str, api_key: str, timeout: int = 20) -> tuple[bool, str]:
+    if not api_key:
+        return False, "Missing GEMINI_API_KEY in Streamlit secrets."
+
+    url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
     payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": "Reply only with OK"}],
+        "contents": [
+            {
+                "parts": [{"text": "Reply only with OK"}]
+            }
+        ]
     }
 
     try:
-        response = requests.post(url=url, headers=headers, json=payload, timeout=timeout)
-        if response.ok:
-            data = response.json()
-            text = data["choices"][0]["message"]["content"]
-            return True, text
+        response = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=timeout)
+        if not response.ok:
+            try:
+                return False, f"{response.status_code} {response.json()}"
+            except Exception:
+                return False, f"{response.status_code} {response.text}"
 
-        try:
-            err = response.json()
-            return False, f"{response.status_code} {err}"
-        except Exception:
-            return False, f"{response.status_code} {response.text}"
-
+        data = response.json()
+        return True, gemini_text_from_response(data)
     except Exception as exc:
         return False, str(exc)
 
@@ -266,9 +255,8 @@ def safe_json_load(text: str) -> dict:
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start != -1 and end != -1 and end > start:
-            candidate = cleaned[start:end + 1]
-            return json.loads(candidate)
-        raise ValueError("Could not parse JSON from LLM response.")
+            return json.loads(cleaned[start:end + 1])
+        raise ValueError("Could not parse JSON from model response.")
 
 
 def canonical_text(value: str) -> str:
@@ -398,6 +386,9 @@ def graph_context_text(graph: GraphData, limit_nodes: int = 220, limit_edges: in
     return json.dumps({"nodes": nodes, "edges": edges}, indent=2)
 
 
+# ============================================================
+# Placeholder graph
+# ============================================================
 def sample_placeholder_graph() -> GraphData:
     nodes = pd.DataFrame([
         {"id": "sys_scikg", "label": "Sci-KG", "type": "System", "x": -0.15, "y": 0.95, "z": -0.25},
@@ -406,92 +397,20 @@ def sample_placeholder_graph() -> GraphData:
         {"id": "file_ice", "label": "ice_ocean.F90", "type": "File", "x": 1.00, "y": 2.10, "z": -0.15},
         {"id": "v_Fdiff", "label": "F_diff", "type": "Local Variable", "x": -3.75, "y": -1.20, "z": 0.15},
         {"id": "eq_Fdiff", "label": "F_diff = −K_h (∂q/∂z)", "type": "Equation", "x": -3.00, "y": -1.35, "z": 0.00},
-        {"id": "v_dqdz", "label": "∂q/∂z", "type": "Local Variable", "x": -2.35, "y": -0.95, "z": 0.15},
-        {"id": "v_q", "label": "q", "type": "Local Variable", "x": -1.85, "y": -0.40, "z": 0.05},
-        {"id": "eq_dqdy", "label": "∂q/∂y = dh · dμ_ocn / ρ_atm", "type": "Equation", "x": -2.45, "y": 0.30, "z": -0.20},
-        {"id": "v_dqdy", "label": "∂q/∂y", "type": "Local Variable", "x": -1.95, "y": 0.00, "z": -0.10},
-        {"id": "eq_virtem", "label": "virtem = t · (1.0 + zvir · q)", "type": "Equation", "x": -1.00, "y": -0.70, "z": -0.25},
-        {"id": "eq_dqdt", "label": "∂q/∂t = (q₃ − q_minus) / δt", "type": "Equation", "x": 0.35, "y": 0.10, "z": -0.20},
-        {"id": "v_dqdt", "label": "∂q/∂t", "type": "Local Variable", "x": -0.55, "y": -0.05, "z": 0.00},
-        {"id": "eq_Tv1", "label": "Tᵥ = T(1 + 0.61q)", "type": "Equation", "x": -1.20, "y": 0.20, "z": 0.00},
-        {"id": "v_Tv", "label": "Tᵥ", "type": "Local Variable", "x": -1.40, "y": 0.75, "z": 0.12},
-        {"id": "eq_Tv2", "label": "Tᵥ = T · TVFC", "type": "Equation", "x": -0.55, "y": 1.20, "z": 0.00},
-        {"id": "v_TVFC", "label": "TVFC", "type": "Local Variable", "x": -1.00, "y": 1.95, "z": -0.10},
-        {"id": "v_T", "label": "T", "type": "Local Variable", "x": -0.35, "y": 1.00, "z": 0.15},
-        {"id": "eq_flwout", "label": "flwout_ocn = −σ_SB T_sf⁴", "type": "Equation", "x": 0.15, "y": 1.75, "z": 0.00},
-        {"id": "v_flwout", "label": "flwout_ocn", "type": "Local Variable", "x": -0.10, "y": 0.75, "z": -0.15},
-        {"id": "v_sigmaSB", "label": "σ_SB", "type": "Constant", "x": 0.55, "y": 1.45, "z": -0.10},
-        {"id": "v_Tsf", "label": "T_sf", "type": "Local Variable", "x": 0.10, "y": 2.55, "z": 0.12},
-        {"id": "eq_Tsf", "label": "T_sf = sst + T_fresh", "type": "Equation", "x": 0.55, "y": 2.55, "z": 0.00},
-        {"id": "v_Tfresh", "label": "T_fresh", "type": "Local Variable", "x": 0.05, "y": 3.20, "z": 0.05},
-        {"id": "v_sst", "label": "sst", "type": "Local Variable", "x": 0.90, "y": 3.40, "z": 0.10},
-        {"id": "eq_dsstdt", "label": "∂sst/∂t", "type": "Equation", "x": 1.30, "y": 3.00, "z": 0.18},
-        {"id": "eq_frzmlt", "label": "frzmlt = T_f − sst", "type": "Equation", "x": 0.55, "y": 4.15, "z": 0.00},
-        {"id": "v_frzmlt", "label": "frzmlt", "type": "Local Variable", "x": -0.10, "y": 4.65, "z": -0.10},
-        {"id": "v_Tf", "label": "T_f", "type": "Local Variable", "x": 1.15, "y": 4.15, "z": 0.05},
     ])
-
     edges = pd.DataFrame([
         {"source": "sys_scikg", "target": "file_diff", "relation": "has"},
         {"source": "sys_scikg", "target": "file_geo", "relation": "has"},
         {"source": "sys_scikg", "target": "file_ice", "relation": "has"},
         {"source": "file_diff", "target": "eq_Fdiff", "relation": "encodes"},
-        {"source": "file_geo", "target": "eq_Tv1", "relation": "encodes"},
-        {"source": "file_geo", "target": "eq_Tv2", "relation": "encodes"},
-        {"source": "file_ice", "target": "eq_flwout", "relation": "encodes"},
-        {"source": "file_ice", "target": "eq_Tsf", "relation": "encodes"},
-        {"source": "file_ice", "target": "eq_frzmlt", "relation": "encodes"},
         {"source": "v_Fdiff", "target": "eq_Fdiff", "relation": "hasVariable"},
-        {"source": "eq_Fdiff", "target": "v_dqdz", "relation": "hasVariable"},
-        {"source": "v_dqdz", "target": "v_q", "relation": "related_to"},
-        {"source": "v_q", "target": "eq_Tv1", "relation": "hasVariable"},
-        {"source": "eq_Tv1", "target": "v_Tv", "relation": "hasVariable"},
-        {"source": "v_Tv", "target": "eq_Tv2", "relation": "hasVariable"},
-        {"source": "eq_Tv2", "target": "v_T", "relation": "hasVariable"},
-        {"source": "v_T", "target": "eq_flwout", "relation": "related_to"},
-        {"source": "eq_flwout", "target": "v_Tsf", "relation": "hasVariable"},
-        {"source": "v_Tsf", "target": "eq_Tsf", "relation": "hasVariable"},
-        {"source": "eq_Tsf", "target": "v_sst", "relation": "hasVariable"},
-        {"source": "v_sst", "target": "eq_dsstdt", "relation": "related_to"},
-        {"source": "v_sst", "target": "eq_frzmlt", "relation": "related_to"},
-        {"source": "eq_dqdy", "target": "v_dqdy", "relation": "hasVariable"},
-        {"source": "v_dqdy", "target": "v_q", "relation": "related_to"},
-        {"source": "eq_virtem", "target": "v_q", "relation": "hasVariable"},
-        {"source": "eq_dqdt", "target": "v_dqdt", "relation": "hasVariable"},
-        {"source": "v_dqdt", "target": "v_q", "relation": "related_to"},
-        {"source": "eq_Tv2", "target": "v_TVFC", "relation": "hasVariable"},
-        {"source": "eq_flwout", "target": "v_sigmaSB", "relation": "hasConstant"},
-        {"source": "eq_Tsf", "target": "v_Tfresh", "relation": "hasVariable"},
-        {"source": "eq_frzmlt", "target": "v_frzmlt", "relation": "hasVariable"},
-        {"source": "eq_frzmlt", "target": "v_Tf", "relation": "hasVariable"},
-        {"source": "eq_flwout", "target": "v_flwout", "relation": "hasVariable"},
     ])
-
     return deduplicate_graph(nodes, edges)
 
 
 def get_placeholder_highlight_sets() -> tuple[set[str], set[tuple[str, str]]]:
-    highlight_nodes = {
-        "v_Fdiff", "eq_Fdiff", "v_dqdz", "v_q", "eq_Tv1", "v_Tv",
-        "eq_Tv2", "v_T", "eq_flwout", "v_Tsf", "eq_Tsf",
-        "v_sst", "eq_dsstdt", "eq_frzmlt"
-    }
-    red_edge_pairs = [
-        ("v_Fdiff", "eq_Fdiff"),
-        ("eq_Fdiff", "v_dqdz"),
-        ("v_dqdz", "v_q"),
-        ("v_q", "eq_Tv1"),
-        ("eq_Tv1", "v_Tv"),
-        ("v_Tv", "eq_Tv2"),
-        ("eq_Tv2", "v_T"),
-        ("v_T", "eq_flwout"),
-        ("eq_flwout", "v_Tsf"),
-        ("v_Tsf", "eq_Tsf"),
-        ("eq_Tsf", "v_sst"),
-        ("v_sst", "eq_dsstdt"),
-        ("v_sst", "eq_frzmlt"),
-    ]
-    highlight_edges = {tuple(sorted(x)) for x in red_edge_pairs}
+    highlight_nodes = {"v_Fdiff", "eq_Fdiff"}
+    highlight_edges = {tuple(sorted(("v_Fdiff", "eq_Fdiff")))}
     return highlight_nodes, highlight_edges
 
 
@@ -513,11 +432,7 @@ def build_nx_graph(graph: GraphData, low_contrast: bool = False) -> nx.Graph:
             )
         graph_nx.add_node(str(row["id"]), **attrs)
     for _, row in graph.edges.iterrows():
-        graph_nx.add_edge(
-            str(row["source"]),
-            str(row["target"]),
-            relation=str(row["relation"]),
-        )
+        graph_nx.add_edge(str(row["source"]), str(row["target"]), relation=str(row["relation"]))
     return graph_nx
 
 
@@ -542,12 +457,7 @@ def get_graph_positions(graph_nx: nx.Graph) -> dict:
     return nx.spring_layout(graph_nx, dim=3, seed=12, k=1.35, iterations=200)
 
 
-def render_3d_graph(
-    graph_nx: nx.Graph,
-    highlight_nodes: Optional[set[str]] = None,
-    highlight_edges: Optional[set[tuple[str, str]]] = None,
-    placeholder_mode: bool = False,
-):
+def render_3d_graph(graph_nx: nx.Graph, highlight_nodes=None, highlight_edges=None, placeholder_mode: bool = False):
     if not PLOTLY_AVAILABLE or go is None:
         return None
 
@@ -568,7 +478,6 @@ def render_3d_graph(
         x0, y0, z0 = pos[source]
         x1, y1, z1 = pos[target]
         edge_key = tuple(sorted((source, target)))
-
         if edge_key in highlight_edges:
             red_edge_x += [x0, x1, None]
             red_edge_y += [y0, y1, None]
@@ -579,38 +488,20 @@ def render_3d_graph(
             ash_edge_z += [z0, z1, None]
 
     ash_edge_trace = go.Scatter3d(
-        x=ash_edge_x,
-        y=ash_edge_y,
-        z=ash_edge_z,
+        x=ash_edge_x, y=ash_edge_y, z=ash_edge_z,
         mode="lines",
         line=dict(color="rgba(40,40,40,0.45)", width=4),
-        hoverinfo="none",
-        showlegend=False,
+        hoverinfo="none", showlegend=False
     )
-
     red_edge_trace = go.Scatter3d(
-        x=red_edge_x,
-        y=red_edge_y,
-        z=red_edge_z,
+        x=red_edge_x, y=red_edge_y, z=red_edge_z,
         mode="lines",
         line=dict(color="rgba(206,40,40,0.95)", width=7),
-        hoverinfo="none",
-        showlegend=False,
+        hoverinfo="none", showlegend=False
     )
 
-    xs = [p[0] for p in pos.values()]
-    ys = [p[1] for p in pos.values()]
-    zs = [p[2] for p in pos.values()]
-    cx = sum(xs) / len(xs)
-    cy = sum(ys) / len(ys)
-    cz = sum(zs) / len(zs)
-
-    reg_x, reg_y, reg_z = [], [], []
-    reg_text, reg_colors, reg_sizes = [], [], []
-    hi_x, hi_y, hi_z = [], [], []
-    hi_text, hi_colors, hi_sizes = [], [], []
-    label_x, label_y, label_z = [], [], []
-    label_text = []
+    reg_x, reg_y, reg_z, reg_text, reg_colors, reg_sizes = [], [], [], [], [], []
+    hi_x, hi_y, hi_z, hi_text, hi_colors, hi_sizes = [], [], [], [], [], []
 
     for node, data in graph_nx.nodes(data=True):
         x, y, z = pos[node]
@@ -621,77 +512,31 @@ def render_3d_graph(
         node_size = 14 if node_type == "System" else (12 if node_type == "Equation" else 8)
 
         if node in highlight_nodes:
-            hi_x.append(x)
-            hi_y.append(y)
-            hi_z.append(z)
-            hi_text.append(hover_text)
-            hi_colors.append(node_color)
-            hi_sizes.append(node_size)
+            hi_x.append(x); hi_y.append(y); hi_z.append(z)
+            hi_text.append(hover_text); hi_colors.append(node_color); hi_sizes.append(node_size)
         else:
-            reg_x.append(x)
-            reg_y.append(y)
-            reg_z.append(z)
-            reg_text.append(hover_text)
-            reg_colors.append(node_color)
-            reg_sizes.append(node_size)
-
-        dx = x - cx
-        dy = y - cy
-        dz = z - cz
-        norm = (dx**2 + dy**2 + dz**2) ** 0.5
-        if norm == 0:
-            norm = 1.0
-
-        offset = 0.22 if node_type == "System" else (0.18 if node_type == "Equation" else 0.12)
-        label_x.append(x + offset * dx / norm)
-        label_y.append(y + offset * dy / norm)
-        label_z.append(z + offset * dz / norm)
-        label_text.append(label)
+            reg_x.append(x); reg_y.append(y); reg_z.append(z)
+            reg_text.append(hover_text); reg_colors.append(node_color); reg_sizes.append(node_size)
 
     regular_trace = go.Scatter3d(
-        x=reg_x,
-        y=reg_y,
-        z=reg_z,
+        x=reg_x, y=reg_y, z=reg_z,
         mode="markers",
         text=reg_text,
         hovertemplate="%{text}<extra></extra>",
-        marker=dict(
-            size=reg_sizes,
-            color=reg_colors,
-            opacity=0.98,
-            line=dict(color="rgba(60,60,60,0.30)", width=1.0),
-        ),
-        showlegend=False,
+        marker=dict(size=reg_sizes, color=reg_colors, opacity=0.98, line=dict(color="rgba(60,60,60,0.30)", width=1.0)),
+        showlegend=False
     )
 
     highlight_trace = go.Scatter3d(
-        x=hi_x,
-        y=hi_y,
-        z=hi_z,
+        x=hi_x, y=hi_y, z=hi_z,
         mode="markers",
         text=hi_text,
         hovertemplate="%{text}<extra></extra>",
-        marker=dict(
-            size=hi_sizes,
-            color=hi_colors,
-            opacity=1.0,
-            line=dict(color="#C81E1E", width=2.3),
-        ),
-        showlegend=False,
+        marker=dict(size=hi_sizes, color=hi_colors, opacity=1.0, line=dict(color="#C81E1E", width=2.3)),
+        showlegend=False
     )
 
-    label_trace = go.Scatter3d(
-        x=label_x,
-        y=label_y,
-        z=label_z,
-        mode="text",
-        text=label_text,
-        textfont=dict(size=12, color="#3F4752"),
-        hoverinfo="none",
-        showlegend=False,
-    )
-
-    fig = go.Figure(data=[ash_edge_trace, red_edge_trace, regular_trace, highlight_trace, label_trace])
+    fig = go.Figure(data=[ash_edge_trace, red_edge_trace, regular_trace, highlight_trace])
     fig.update_layout(
         height=560,
         showlegend=False,
@@ -722,14 +567,7 @@ def render_2d_graph(graph_nx: nx.Graph):
     node_colors = [data.get("color", NODE_COLOR_MAP["Unknown"]) for _, data in graph_nx.nodes(data=True)]
     labels = {node: data.get("label", node) for node, data in graph_nx.nodes(data=True)}
 
-    nx.draw_networkx_edges(
-        graph_nx,
-        pos,
-        ax=ax,
-        alpha=0.35,
-        width=1.6,
-        edge_color="#2f2f2f",
-    )
+    nx.draw_networkx_edges(graph_nx, pos, ax=ax, alpha=0.35, width=1.6, edge_color="#2f2f2f")
     nx.draw_networkx_nodes(graph_nx, pos, ax=ax, node_color=node_colors, node_size=380)
     nx.draw_networkx_labels(graph_nx, pos, labels=labels, ax=ax, font_size=8)
     fig.tight_layout()
@@ -737,78 +575,66 @@ def render_2d_graph(graph_nx: nx.Graph):
 
 
 # ============================================================
-# OpenRouter client
+# Gemini client
 # ============================================================
 class LLMClient:
-    def __init__(self, base_url: str, model: str, api_key: str, timeout: int = DEFAULT_TIMEOUT_SECONDS):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, model: str, api_key: str, timeout: int = DEFAULT_TIMEOUT_SECONDS):
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
 
     def is_configured(self) -> bool:
-        return bool(self.base_url and self.model and self.api_key)
+        return bool(self.model and self.api_key)
 
     def chat(self, system_prompt: str, user_prompt: str, response_format: Optional[dict] = None) -> str:
         if not self.is_configured():
-            return "OpenRouter is not configured yet. Add OPENROUTER_API_KEY to Streamlit secrets."
-        return self._chat_openai_compatible(system_prompt, user_prompt, response_format=response_format)
+            return "Gemini is not configured yet. Add GEMINI_API_KEY to Streamlit secrets."
 
-    def _chat_openai_compatible(self, system_prompt: str, user_prompt: str, response_format: Optional[dict] = None) -> str:
-        url = f"{self.base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": OPENROUTER_SITE_URL,
-            "X-OpenRouter-Title": OPENROUTER_SITE_NAME,
-        }
+        url = f"{GEMINI_BASE_URL}/models/{self.model}:generateContent?key={self.api_key}"
+
         payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+            "systemInstruction": {
+                "parts": [{"text": system_prompt}]
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": user_prompt}]
+                }
+            ]
         }
-        if response_format is not None:
-            payload["response_format"] = response_format
+
+        if response_format is not None and response_format.get("type") == "json_object":
+            payload["generationConfig"] = {
+                "responseMimeType": "application/json"
+            }
 
         last_error = None
         for attempt in range(3):
             try:
-                response = requests.post(url=url, headers=headers, json=payload, timeout=self.timeout)
+                response = requests.post(
+                    url,
+                    headers={"Content-Type": "application/json"},
+                    json=payload,
+                    timeout=self.timeout,
+                )
+
                 if not response.ok:
                     try:
                         err = response.json()
                     except Exception:
                         err = response.text
-                    raise RuntimeError(f"OpenRouter error {response.status_code}: {err}")
+                    raise RuntimeError(f"Gemini error {response.status_code}: {err}")
 
                 data = response.json()
-                choices = data.get("choices", [])
-                if not choices:
-                    raise ValueError(f"No choices returned by OpenRouter. Response: {data}")
-
-                message = choices[0].get("message", {})
-                content = message.get("content", "")
-                if isinstance(content, str):
-                    return content
-                if isinstance(content, list):
-                    text_parts = []
-                    for item in content:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            text_parts.append(item.get("text", ""))
-                    joined = "\n".join(part for part in text_parts if part)
-                    if joined:
-                        return joined
-
-                raise ValueError(f"Unsupported OpenRouter response format: {message}")
+                return gemini_text_from_response(data)
 
             except Exception as exc:
                 last_error = exc
                 if attempt < 2:
                     time.sleep(2 * (attempt + 1))
                     continue
-                raise RuntimeError(f"OpenRouter request failed after retries: {last_error}") from exc
+                raise RuntimeError(f"Gemini request failed after retries: {last_error}") from exc
 
 
 # ============================================================
@@ -894,43 +720,25 @@ summary_eqs = 0
 
 if not summary_graph.nodes.empty:
     summary_files = int(summary_graph.nodes[summary_graph.nodes["type"] == "File"].shape[0])
-    summary_vars = int(
-        summary_graph.nodes[
-            summary_graph.nodes["type"].isin(["Global Variable", "Local Variable", "Constant"])
-        ].shape[0]
-    )
+    summary_vars = int(summary_graph.nodes[summary_graph.nodes["type"].isin(["Global Variable", "Local Variable", "Constant"])].shape[0])
     summary_eqs = int(summary_graph.nodes[summary_graph.nodes["type"] == "Equation"].shape[0])
 
-ok, msg = cached_check_openrouter(
-    OPENROUTER_BASE_URL,
-    OPENROUTER_MODEL,
-    get_openrouter_api_key(),
-    20,
-)
+ok, msg = cached_check_gemini(GEMINI_MODEL, get_gemini_api_key(), 20)
 st.session_state.last_health_ok = ok
 st.session_state.last_health_message = msg
 
-
-# ============================================================
-# Fixed defaults
-# ============================================================
 system_name = DEFAULT_SYSTEM_NAME
 
-
-# ============================================================
-# Sidebar
-# ============================================================
 with st.sidebar:
     st.header("CLEVER Settings")
-
     if ok:
         st.markdown(
-            f'<div class="status-pill ok-pill">OpenRouter online<br>{OPENROUTER_MODEL}</div>',
+            f'<div class="status-pill ok-pill">Gemini online<br>{GEMINI_MODEL}</div>',
             unsafe_allow_html=True,
         )
     else:
         st.markdown(
-            f'<div class="status-pill warn-pill">OpenRouter offline<br>{OPENROUTER_MODEL}</div>',
+            f'<div class="status-pill warn-pill">Gemini offline<br>{GEMINI_MODEL}</div>',
             unsafe_allow_html=True,
         )
         st.caption(msg)
@@ -949,10 +757,10 @@ with st.sidebar:
         st.metric("Edges", summary_edges)
 
     with st.expander("Debug"):
-        key = get_openrouter_api_key()
+        key = get_gemini_api_key()
         st.caption(f"Key loaded: {bool(key)}")
-        st.caption(f"Key prefix: {key[:12] if key else 'N/A'}")
-        st.caption(f"Model: {OPENROUTER_MODEL}")
+        st.caption(f"Key prefix: {key[:8] if key else 'N/A'}")
+        st.caption(f"Model: {GEMINI_MODEL}")
 
     if st.button("Reset graph", use_container_width=True):
         st.session_state.graph_data = empty_graph()
@@ -961,16 +769,8 @@ with st.sidebar:
         st.session_state.chat_answer = ""
         st.rerun()
 
-llm_client = LLMClient(
-    base_url=OPENROUTER_BASE_URL,
-    model=OPENROUTER_MODEL,
-    api_key=get_openrouter_api_key(),
-)
+llm_client = LLMClient(model=GEMINI_MODEL, api_key=get_gemini_api_key())
 
-
-# ============================================================
-# Main layout
-# ============================================================
 left_col, right_col = st.columns([0.82, 2.18], gap="small")
 
 with left_col:
@@ -998,7 +798,7 @@ with left_col:
 
     if st.button("Ask CLEVER", use_container_width=True):
         if not llm_client.is_configured():
-            st.error("OpenRouter is not configured. Add OPENROUTER_API_KEY to Streamlit secrets.")
+            st.error("Gemini is not configured. Add GEMINI_API_KEY to Streamlit secrets.")
         elif graph_question.strip() == "":
             st.error("Enter a question first.")
         else:
@@ -1007,16 +807,9 @@ with left_col:
                 "You are CLEVER, an agent over a Scientific Knowledge Graph (Sci-KG). "
                 "Use the graph context first. If the graph is insufficient, you may add cautious scientific reasoning and clearly mark it as added knowledge."
             )
-            user_prompt = (
-                "Graph context:\n"
-                f"{context}\n\n"
-                f"User question: {graph_question}"
-            )
+            user_prompt = f"Graph context:\n{context}\n\nUser question: {graph_question}"
             try:
-                st.session_state.chat_answer = llm_client.chat(
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                )
+                st.session_state.chat_answer = llm_client.chat(system_prompt=system_prompt, user_prompt=user_prompt)
             except Exception as exc:
                 st.session_state.chat_answer = f"Error: {exc}"
 
@@ -1077,15 +870,11 @@ with right_col:
         fig_2d = render_2d_graph(view_graph)
         st.pyplot(fig_2d, use_container_width=True)
 
-
-# ============================================================
-# Build graph after UI inputs are bound
-# ============================================================
 if build_clicked:
     if not uploaded_files:
         st.error("Upload at least one scientific file.")
     elif not llm_client.is_configured():
-        st.error("OpenRouter is not configured. Add OPENROUTER_API_KEY to Streamlit secrets.")
+        st.error("Gemini is not configured. Add GEMINI_API_KEY to Streamlit secrets.")
     else:
         selected_files = [f for f in uploaded_files if allowed_extension(f.name)][:file_limit]
         if not selected_files:
@@ -1133,7 +922,6 @@ if build_clicked:
                         "seconds": round(time.time() - file_start, 2),
                         "status": f"error: {exc}",
                     })
-
                 progress.progress(idx / max(1, len(selected_files)))
 
             merged = merge_graphs([st.session_state.graph_data] + fragments)
