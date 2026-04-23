@@ -922,12 +922,12 @@ with st.sidebar:
 
     if ok:
         st.markdown(
-            f'<div class="status-pill ok-pill">Gemma 4 online<br>{GEMINI_MODEL}</div>'
+            f'<div class="status-pill ok-pill">Gemma 4 online<br>{GEMINI_MODEL}</div>',
             unsafe_allow_html=True,
         )
     else:
         st.markdown(
-            f'<div class="status-pill warn-pill">Gemma 4 offline<br>{GEMINI_MODEL}</div>'
+            f'<div class="status-pill warn-pill">Gemma 4 offline<br>{GEMINI_MODEL}</div>',
             unsafe_allow_html=True,
         )
         st.caption(msg)
