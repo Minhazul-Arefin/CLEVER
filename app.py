@@ -397,20 +397,92 @@ def sample_placeholder_graph() -> GraphData:
         {"id": "file_ice", "label": "ice_ocean.F90", "type": "File", "x": 1.00, "y": 2.10, "z": -0.15},
         {"id": "v_Fdiff", "label": "F_diff", "type": "Local Variable", "x": -3.75, "y": -1.20, "z": 0.15},
         {"id": "eq_Fdiff", "label": "F_diff = −K_h (∂q/∂z)", "type": "Equation", "x": -3.00, "y": -1.35, "z": 0.00},
+        {"id": "v_dqdz", "label": "∂q/∂z", "type": "Local Variable", "x": -2.35, "y": -0.95, "z": 0.15},
+        {"id": "v_q", "label": "q", "type": "Local Variable", "x": -1.85, "y": -0.40, "z": 0.05},
+        {"id": "eq_dqdy", "label": "∂q/∂y = dh · dμ_ocn / ρ_atm", "type": "Equation", "x": -2.45, "y": 0.30, "z": -0.20},
+        {"id": "v_dqdy", "label": "∂q/∂y", "type": "Local Variable", "x": -1.95, "y": 0.00, "z": -0.10},
+        {"id": "eq_virtem", "label": "virtem = t · (1.0 + zvir · q)", "type": "Equation", "x": -1.00, "y": -0.70, "z": -0.25},
+        {"id": "eq_dqdt", "label": "∂q/∂t = (q₃ − q_minus) / δt", "type": "Equation", "x": 0.35, "y": 0.10, "z": -0.20},
+        {"id": "v_dqdt", "label": "∂q/∂t", "type": "Local Variable", "x": -0.55, "y": -0.05, "z": 0.00},
+        {"id": "eq_Tv1", "label": "Tᵥ = T(1 + 0.61q)", "type": "Equation", "x": -1.20, "y": 0.20, "z": 0.00},
+        {"id": "v_Tv", "label": "Tᵥ", "type": "Local Variable", "x": -1.40, "y": 0.75, "z": 0.12},
+        {"id": "eq_Tv2", "label": "Tᵥ = T · TVFC", "type": "Equation", "x": -0.55, "y": 1.20, "z": 0.00},
+        {"id": "v_TVFC", "label": "TVFC", "type": "Local Variable", "x": -1.00, "y": 1.95, "z": -0.10},
+        {"id": "v_T", "label": "T", "type": "Local Variable", "x": -0.35, "y": 1.00, "z": 0.15},
+        {"id": "eq_flwout", "label": "flwout_ocn = −σ_SB T_sf⁴", "type": "Equation", "x": 0.15, "y": 1.75, "z": 0.00},
+        {"id": "v_flwout", "label": "flwout_ocn", "type": "Local Variable", "x": -0.10, "y": 0.75, "z": -0.15},
+        {"id": "v_sigmaSB", "label": "σ_SB", "type": "Constant", "x": 0.55, "y": 1.45, "z": -0.10},
+        {"id": "v_Tsf", "label": "T_sf", "type": "Local Variable", "x": 0.10, "y": 2.55, "z": 0.12},
+        {"id": "eq_Tsf", "label": "T_sf = sst + T_fresh", "type": "Equation", "x": 0.55, "y": 2.55, "z": 0.00},
+        {"id": "v_Tfresh", "label": "T_fresh", "type": "Local Variable", "x": 0.05, "y": 3.20, "z": 0.05},
+        {"id": "v_sst", "label": "sst", "type": "Local Variable", "x": 0.90, "y": 3.40, "z": 0.10},
+        {"id": "eq_dsstdt", "label": "∂sst/∂t", "type": "Equation", "x": 1.30, "y": 3.00, "z": 0.18},
+        {"id": "eq_frzmlt", "label": "frzmlt = T_f − sst", "type": "Equation", "x": 0.55, "y": 4.15, "z": 0.00},
+        {"id": "v_frzmlt", "label": "frzmlt", "type": "Local Variable", "x": -0.10, "y": 4.65, "z": -0.10},
+        {"id": "v_Tf", "label": "T_f", "type": "Local Variable", "x": 1.15, "y": 4.15, "z": 0.05},
     ])
+
     edges = pd.DataFrame([
         {"source": "sys_scikg", "target": "file_diff", "relation": "has"},
         {"source": "sys_scikg", "target": "file_geo", "relation": "has"},
         {"source": "sys_scikg", "target": "file_ice", "relation": "has"},
         {"source": "file_diff", "target": "eq_Fdiff", "relation": "encodes"},
+        {"source": "file_geo", "target": "eq_Tv1", "relation": "encodes"},
+        {"source": "file_geo", "target": "eq_Tv2", "relation": "encodes"},
+        {"source": "file_ice", "target": "eq_flwout", "relation": "encodes"},
+        {"source": "file_ice", "target": "eq_Tsf", "relation": "encodes"},
+        {"source": "file_ice", "target": "eq_frzmlt", "relation": "encodes"},
         {"source": "v_Fdiff", "target": "eq_Fdiff", "relation": "hasVariable"},
+        {"source": "eq_Fdiff", "target": "v_dqdz", "relation": "hasVariable"},
+        {"source": "v_dqdz", "target": "v_q", "relation": "related_to"},
+        {"source": "v_q", "target": "eq_Tv1", "relation": "hasVariable"},
+        {"source": "eq_Tv1", "target": "v_Tv", "relation": "hasVariable"},
+        {"source": "v_Tv", "target": "eq_Tv2", "relation": "hasVariable"},
+        {"source": "eq_Tv2", "target": "v_T", "relation": "hasVariable"},
+        {"source": "v_T", "target": "eq_flwout", "relation": "related_to"},
+        {"source": "eq_flwout", "target": "v_Tsf", "relation": "hasVariable"},
+        {"source": "v_Tsf", "target": "eq_Tsf", "relation": "hasVariable"},
+        {"source": "eq_Tsf", "target": "v_sst", "relation": "hasVariable"},
+        {"source": "v_sst", "target": "eq_dsstdt", "relation": "related_to"},
+        {"source": "v_sst", "target": "eq_frzmlt", "relation": "related_to"},
+        {"source": "eq_dqdy", "target": "v_dqdy", "relation": "hasVariable"},
+        {"source": "v_dqdy", "target": "v_q", "relation": "related_to"},
+        {"source": "eq_virtem", "target": "v_q", "relation": "hasVariable"},
+        {"source": "eq_dqdt", "target": "v_dqdt", "relation": "hasVariable"},
+        {"source": "v_dqdt", "target": "v_q", "relation": "related_to"},
+        {"source": "eq_Tv2", "target": "v_TVFC", "relation": "hasVariable"},
+        {"source": "eq_flwout", "target": "v_sigmaSB", "relation": "hasConstant"},
+        {"source": "eq_Tsf", "target": "v_Tfresh", "relation": "hasVariable"},
+        {"source": "eq_frzmlt", "target": "v_frzmlt", "relation": "hasVariable"},
+        {"source": "eq_frzmlt", "target": "v_Tf", "relation": "hasVariable"},
+        {"source": "eq_flwout", "target": "v_flwout", "relation": "hasVariable"},
     ])
+
     return deduplicate_graph(nodes, edges)
 
 
 def get_placeholder_highlight_sets() -> tuple[set[str], set[tuple[str, str]]]:
-    highlight_nodes = {"v_Fdiff", "eq_Fdiff"}
-    highlight_edges = {tuple(sorted(("v_Fdiff", "eq_Fdiff")))}
+    highlight_nodes = {
+        "v_Fdiff", "eq_Fdiff", "v_dqdz", "v_q", "eq_Tv1", "v_Tv",
+        "eq_Tv2", "v_T", "eq_flwout", "v_Tsf", "eq_Tsf",
+        "v_sst", "eq_dsstdt", "eq_frzmlt"
+    }
+    red_edge_pairs = [
+        ("v_Fdiff", "eq_Fdiff"),
+        ("eq_Fdiff", "v_dqdz"),
+        ("v_dqdz", "v_q"),
+        ("v_q", "eq_Tv1"),
+        ("eq_Tv1", "v_Tv"),
+        ("v_Tv", "eq_Tv2"),
+        ("eq_Tv2", "v_T"),
+        ("v_T", "eq_flwout"),
+        ("eq_flwout", "v_Tsf"),
+        ("v_Tsf", "eq_Tsf"),
+        ("eq_Tsf", "v_sst"),
+        ("v_sst", "eq_dsstdt"),
+        ("v_sst", "eq_frzmlt"),
+    ]
+    highlight_edges = {tuple(sorted(x)) for x in red_edge_pairs}
     return highlight_nodes, highlight_edges
 
 
