@@ -101,7 +101,7 @@ st.markdown(
 # Constants
 # ============================================================
 SUPPORTED_EXTENSIONS = [
-    ".f90", ".f", ".txt", ".py", ".cpp", ".h", ".json", ".md"
+    ".f90", ".py", ".cpp", ".h", ".json", ".md"
 ]
 
 NODE_COLOR_MAP = {
