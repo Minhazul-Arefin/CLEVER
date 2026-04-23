@@ -68,13 +68,18 @@ st.markdown(
         line-height: 1.5;
     }
     .status-pill {
-        display: inline-block;
-        padding: 0.38rem 0.75rem;
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.5rem 0.75rem;
         border-radius: 999px;
         font-size: 0.8rem;
         border: 1px solid #dbe4f0;
         font-weight: 600;
         margin-top: 0.35rem;
+        line-height: 1.35;
+        word-break: break-word;
+        white-space: normal;
     }
     .ok-pill {
         color: #166534;
@@ -148,12 +153,22 @@ OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free"
 OPENROUTER_SITE_URL = "https://streamlit.io"
 OPENROUTER_SITE_NAME = "CLEVER"
 
-# Replace with your real key
-OPENROUTER_API_KEY = "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"
-
 DEFAULT_TIMEOUT_SECONDS = 90
 DEFAULT_CHUNK_SIZE = 2500
 DEFAULT_SYSTEM_NAME = "Sci-KG"
+
+OPENROUTER_API_KEY = st.secrets["OPENROUTER_API_KEY"]
+
+def get_openrouter_api_key() -> str:
+    return OPENROUTER_API_KEY.strip()
+
+
+# ============================================================
+# Secrets / env
+# ============================================================
+def get_openrouter_api_key() -> str:
+    key = st.secrets.get("OPENROUTER_API_KEY", "").strip()
+    return key
 
 
 # ============================================================
@@ -192,14 +207,10 @@ if "last_health_ok" not in st.session_state:
 # ============================================================
 # Helpers
 # ============================================================
-def get_openrouter_api_key() -> str:
-    return OPENROUTER_API_KEY.strip()
-
-
 @st.cache_data(ttl=60, show_spinner=False)
 def cached_check_openrouter(base_url: str, model: str, api_key: str, timeout: int = 20) -> tuple[bool, str]:
-    if not api_key or api_key == "PASTE_YOUR_OPENROUTER_KEY_HERE":
-        return False, "Missing OpenRouter API key in code"
+    if not api_key:
+        return False, "Missing OPENROUTER_API_KEY in Streamlit secrets."
 
     url = f"{base_url.rstrip('/')}/chat/completions"
     headers = {
@@ -214,16 +225,18 @@ def cached_check_openrouter(base_url: str, model: str, api_key: str, timeout: in
     }
 
     try:
-        response = requests.post(
-            url=url,
-            headers=headers,
-            data=json.dumps(payload),
-            timeout=timeout,
-        )
-        response.raise_for_status()
-        data = response.json()
-        text = data["choices"][0]["message"]["content"]
-        return True, text
+        response = requests.post(url=url, headers=headers, json=payload, timeout=timeout)
+        if response.ok:
+            data = response.json()
+            text = data["choices"][0]["message"]["content"]
+            return True, text
+
+        try:
+            err = response.json()
+            return False, f"{response.status_code} {err}"
+        except Exception:
+            return False, f"{response.status_code} {response.text}"
+
     except Exception as exc:
         return False, str(exc)
 
@@ -734,11 +747,11 @@ class LLMClient:
         self.timeout = timeout
 
     def is_configured(self) -> bool:
-        return bool(self.base_url and self.model and self.api_key and self.api_key != "PASTE_YOUR_OPENROUTER_KEY_HERE")
+        return bool(self.base_url and self.model and self.api_key)
 
     def chat(self, system_prompt: str, user_prompt: str, response_format: Optional[dict] = None) -> str:
         if not self.is_configured():
-            return "OpenRouter is not configured yet."
+            return "OpenRouter is not configured yet. Add OPENROUTER_API_KEY to Streamlit secrets."
         return self._chat_openai_compatible(system_prompt, user_prompt, response_format=response_format)
 
     def _chat_openai_compatible(self, system_prompt: str, user_prompt: str, response_format: Optional[dict] = None) -> str:
@@ -762,13 +775,14 @@ class LLMClient:
         last_error = None
         for attempt in range(3):
             try:
-                response = requests.post(
-                    url=url,
-                    headers=headers,
-                    data=json.dumps(payload),
-                    timeout=self.timeout,
-                )
-                response.raise_for_status()
+                response = requests.post(url=url, headers=headers, json=payload, timeout=self.timeout)
+                if not response.ok:
+                    try:
+                        err = response.json()
+                    except Exception:
+                        err = response.text
+                    raise RuntimeError(f"OpenRouter error {response.status_code}: {err}")
+
                 data = response.json()
                 choices = data.get("choices", [])
                 if not choices:
@@ -786,7 +800,9 @@ class LLMClient:
                     joined = "\n".join(part for part in text_parts if part)
                     if joined:
                         return joined
+
                 raise ValueError(f"Unsupported OpenRouter response format: {message}")
+
             except Exception as exc:
                 last_error = exc
                 if attempt < 2:
@@ -868,14 +884,16 @@ File content:
 # Header
 # ============================================================
 st.title("CLEVER")
-st.caption("Cross-module Latent Equation Variable Extraction and Recovery ")
+st.caption("Cross-module Latent Equation Variable Extraction and Recovery")
 
 summary_graph = st.session_state.graph_data
-summary_files = len(st.session_state.processed_files)
 summary_edges = len(summary_graph.edges)
+summary_files = 0
 summary_vars = 0
 summary_eqs = 0
+
 if not summary_graph.nodes.empty:
+    summary_files = int(summary_graph.nodes[summary_graph.nodes["type"] == "File"].shape[0])
     summary_vars = int(
         summary_graph.nodes[
             summary_graph.nodes["type"].isin(["Global Variable", "Local Variable", "Constant"])
@@ -904,27 +922,24 @@ system_name = DEFAULT_SYSTEM_NAME
 # ============================================================
 with st.sidebar:
     st.header("CLEVER Settings")
+
     if ok:
         st.markdown(
-        f'<span class="status-pill ok-pill">OpenRouter online · {OPENROUTER_MODEL}</span>',
-        unsafe_allow_html=True,
-    )
+            f'<div class="status-pill ok-pill">OpenRouter online<br>{OPENROUTER_MODEL}</div>',
+            unsafe_allow_html=True,
+        )
     else:
         st.markdown(
-        f'<span class="status-pill warn-pill">OpenRouter offline · {OPENROUTER_MODEL}</span>',
-        unsafe_allow_html=True,
-    )
-    st.error(msg)
+            f'<div class="status-pill warn-pill">OpenRouter offline<br>{OPENROUTER_MODEL}</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(msg)
 
-    # st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     file_limit = st.slider("Max files per run", min_value=1, max_value=20, value=3)
     focus_hops = st.slider("Graph neighborhood hops", min_value=1, max_value=4, value=1)
     max_nodes = st.slider("Max rendered nodes", min_value=20, max_value=500, value=180, step=20)
-    # timeout_seconds = st.slider("OpenRouter timeout (seconds)", min_value=15, max_value=180, value=DEFAULT_TIMEOUT_SECONDS, step=5)
 
-    # st.markdown("---")
     st.subheader("Sci-KG Stats")
-
     col1, col2 = st.columns(2)
     with col1:
         st.metric("Files", summary_files)
@@ -932,6 +947,12 @@ with st.sidebar:
     with col2:
         st.metric("Equations", summary_eqs)
         st.metric("Edges", summary_edges)
+
+    with st.expander("Debug"):
+        key = get_openrouter_api_key()
+        st.caption(f"Key loaded: {bool(key)}")
+        st.caption(f"Key prefix: {key[:12] if key else 'N/A'}")
+        st.caption(f"Model: {OPENROUTER_MODEL}")
 
     if st.button("Reset graph", use_container_width=True):
         st.session_state.graph_data = empty_graph()
@@ -944,7 +965,6 @@ llm_client = LLMClient(
     base_url=OPENROUTER_BASE_URL,
     model=OPENROUTER_MODEL,
     api_key=get_openrouter_api_key(),
-    # timeout=timeout_seconds,
 )
 
 
@@ -954,27 +974,21 @@ llm_client = LLMClient(
 left_col, right_col = st.columns([0.82, 2.18], gap="small")
 
 with left_col:
-    # st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.subheader("Files")
     uploaded_files = st.file_uploader(
         "Upload scientific files",
-        type=[ext.replace('.', '') for ext in SUPPORTED_EXTENSIONS],
+        type=[ext.replace(".", "") for ext in SUPPORTED_EXTENSIONS],
         accept_multiple_files=True,
         label_visibility="collapsed",
     )
     build_clicked = st.button("Build Sci-KG", use_container_width=True)
-    # st.markdown(
-    #     # '<div class="tiny-note">The app reads uploaded files, chunks the text, sends each chunk plus an extraction prompt to OpenRouter, gets JSON back, merges duplicate nodes, then builds the graph.</div>',
-    #     unsafe_allow_html=True,
-    # )
-
 
     graph = st.session_state.graph_data
 
-    # st.markdown('<div class="panel" style="margin-top:0.75rem;">', unsafe_allow_html=True)
     st.subheader("Chat")
     focus_options = [""] + sorted(graph.nodes["id"].astype(str).tolist()) if not graph.nodes.empty else [""]
     focus_node = st.selectbox("Focus graph around node", options=focus_options)
+
     graph_question = st.text_area(
         "Question",
         placeholder="Ask about equations, variables, dependencies, files, or scientific meaning.",
@@ -984,7 +998,7 @@ with left_col:
 
     if st.button("Ask CLEVER", use_container_width=True):
         if not llm_client.is_configured():
-            st.error("OpenRouter is not configured.")
+            st.error("OpenRouter is not configured. Add OPENROUTER_API_KEY to Streamlit secrets.")
         elif graph_question.strip() == "":
             st.error("Enter a question first.")
         else:
@@ -1009,10 +1023,7 @@ with left_col:
     if st.session_state.chat_answer:
         st.markdown(f'<div class="answer-box">{st.session_state.chat_answer}</div>', unsafe_allow_html=True)
 
-    st.markdown('</div>', unsafe_allow_html=True)
-
 with right_col:
-    # st.markdown('<div class="panel">', unsafe_allow_html=True)
     st.subheader("Scientific Knowledge Graph")
 
     graph = st.session_state.graph_data
@@ -1038,19 +1049,19 @@ with right_col:
         view_graph = view_graph.subgraph(trimmed_nodes).copy()
 
     if show_placeholder:
-        st.markdown(
-            """
-            <div style="display:flex; gap:14px; white-space:nowrap; overflow-x:auto; font-size:0.82rem; margin-bottom:8px;">
-                <span>🟤 System</span>
-                <span>🔵 Equation</span>
-                <span>🟠 Variable / Constant</span>
-                <span>🟢 File</span>
-                <span>⚫ Dependency edge</span>
-                <span>🔴 Highlighted path</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        with c1:
+            st.markdown("🟤 **System**")
+        with c2:
+            st.markdown("🔵 **Equation**")
+        with c3:
+            st.markdown("🟠 **Variable**")
+        with c4:
+            st.markdown("🟢 **File**")
+        with c5:
+            st.markdown("⚫ **Edge**")
+        with c6:
+            st.markdown("🔴 **Path**")
 
     fig_3d = render_3d_graph(
         view_graph,
@@ -1058,14 +1069,13 @@ with right_col:
         highlight_edges=highlight_edges,
         placeholder_mode=show_placeholder,
     )
+
     if fig_3d is not None:
         st.plotly_chart(fig_3d, use_container_width=True, config={"displaylogo": False})
     else:
         st.info("Plotly is not installed, so the app is showing a 2D fallback graph.")
         fig_2d = render_2d_graph(view_graph)
         st.pyplot(fig_2d, use_container_width=True)
-
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ============================================================
@@ -1075,7 +1085,7 @@ if build_clicked:
     if not uploaded_files:
         st.error("Upload at least one scientific file.")
     elif not llm_client.is_configured():
-        st.error("OpenRouter is not configured. Put your API key in OPENROUTER_API_KEY.")
+        st.error("OpenRouter is not configured. Add OPENROUTER_API_KEY to Streamlit secrets.")
     else:
         selected_files = [f for f in uploaded_files if allowed_extension(f.name)][:file_limit]
         if not selected_files:
@@ -1123,6 +1133,7 @@ if build_clicked:
                         "seconds": round(time.time() - file_start, 2),
                         "status": f"error: {exc}",
                     })
+
                 progress.progress(idx / max(1, len(selected_files)))
 
             merged = merge_graphs([st.session_state.graph_data] + fragments)
