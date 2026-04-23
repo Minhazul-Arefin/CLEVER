@@ -101,7 +101,7 @@ st.markdown(
 # Constants
 # ============================================================
 SUPPORTED_EXTENSIONS = [
-    ".f90", ".py", ".cpp", ".h", ".json", ".md"
+    ".f90", ".f", ".for", ".f95", ".txt", ".py", ".c", ".cpp", ".h", ".hpp", ".json", ".md"
 ]
 
 NODE_COLOR_MAP = {
@@ -914,6 +914,7 @@ with st.sidebar:
         f'<span class="status-pill warn-pill">OpenRouter offline · {OPENROUTER_MODEL}</span>',
         unsafe_allow_html=True,
     )
+    st.error(msg)
 
     # st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
     file_limit = st.slider("Max files per run", min_value=1, max_value=20, value=3)
