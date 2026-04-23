@@ -1,6 +1,6 @@
-streamlit
-networkx
-pandas
-requests
-plotly
-matplotlib
+streamlit>=1.32
+networkx>=3.0
+pandas>=2.0
+requests>=2.31
+plotly>=5.18
+matplotlib>=3.7
