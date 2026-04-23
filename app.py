@@ -149,7 +149,7 @@ ALLOWED_RELATIONS = {
 }
 
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-OPENROUTER_MODEL = "google/gemma-4-26b-a4b-it:free"
+OPENROUTER_MODEL = "nvidia/nemotron-3-nano-30b-a3b:free"
 OPENROUTER_SITE_URL = "https://streamlit.io"
 OPENROUTER_SITE_NAME = "CLEVER"
 
