@@ -1,0 +1,137 @@
+clever-sci-kg/
+│
+├── README.md
+├── LICENSE
+├── CITATION.cff
+├── pyproject.toml
+├── requirements.txt
+├── environment.yml
+├── .gitignore
+├── .devcontainer/
+│   └── devcontainer.json
+│
+├── docs/
+│   ├── overview.md
+│   ├── installation.md
+│   ├── quickstart.md
+│   ├── data_format.md
+│   ├── reproduction_guide.md
+│   └── api_reference.md
+│
+├── src/
+│   └── clever/
+│       ├── __init__.py
+│       ├── config.py
+│       │
+│       ├── extraction/
+│       │   ├── __init__.py
+│       │   ├── fortran_parser.py
+│       │   ├── equation_extractor.py
+│       │   ├── variable_extractor.py
+│       │   ├── constant_extractor.py
+│       │   └── llm_extractor.py
+│       │
+│       ├── graph/
+│       │   ├── __init__.py
+│       │   ├── schema.py
+│       │   ├── build_graph.py
+│       │   ├── neo4j_loader.py
+│       │   ├── cytoscape_export.py
+│       │   └── path_discovery.py
+│       │
+│       ├── symbolic/
+│       │   ├── __init__.py
+│       │   ├── equation_chain.py
+│       │   ├── surrogate_builder.py
+│       │   ├── fex_runner.py
+│       │   └── simplification.py
+│       │
+│       ├── validation/
+│       │   ├── __init__.py
+│       │   ├── metrics.py
+│       │   ├── residual_analysis.py
+│       │   ├── extraction_accuracy.py
+│       │   └── benchmark_runner.py
+│       │
+│       ├── visualization/
+│       │   ├── __init__.py
+│       │   ├── graph_plot.py
+│       │   ├── figure_7_paths.py
+│       │   ├── figure_8_validation.py
+│       │   ├── figure_9_accuracy.py
+│       │   └── style.py
+│       │
+│       └── app/
+│           ├── __init__.py
+│           └── streamlit_app.py
+│
+├── scripts/
+│   ├── 01_extract_entities.py
+│   ├── 02_build_scikg.py
+│   ├── 03_discover_paths.py
+│   ├── 04_build_symbolic_surrogates.py
+│   ├── 05_validate_surrogates.py
+│   ├── 06_generate_main_figures.py
+│   └── 07_generate_supplementary_figures.py
+│
+├── configs/
+│   ├── clever_default.yaml
+│   ├── e3sm_modules.yaml
+│   ├── neo4j_config.example.yaml
+│   └── llm_config.example.yaml
+│
+├── data/
+│   ├── README.md
+│   ├── raw/
+│   │   └── .gitkeep
+│   ├── interim/
+│   │   └── .gitkeep
+│   ├── processed/
+│   │   └── .gitkeep
+│   └── examples/
+│       ├── sample_fortran_file.F90
+│       ├── sample_math.txt
+│       ├── sample_nodes.csv
+│       └── sample_edges.csv
+│
+├── outputs/
+│   ├── README.md
+│   ├── graphs/
+│   │   └── .gitkeep
+│   ├── figures/
+│   │   └── .gitkeep
+│   ├── tables/
+│   │   └── .gitkeep
+│   └── logs/
+│       └── .gitkeep
+│
+├── notebooks/
+│   ├── 01_scikg_demo.ipynb
+│   ├── 02_path_discovery_demo.ipynb
+│   └── 03_symbolic_surrogate_demo.ipynb
+│
+├── tests/
+│   ├── test_extraction.py
+│   ├── test_graph_schema.py
+│   ├── test_path_discovery.py
+│   ├── test_symbolic_surrogate.py
+│   └── test_metrics.py
+│
+├── paper/
+│   ├── supplementary_materials/
+│   │   ├── supplementary_materials.md
+│   │   ├── supplementary_tables/
+│   │   └── supplementary_figures/
+│   └── figure_scripts/
+│       ├── make_fig7.py
+│       ├── make_fig8.py
+│       └── make_fig9.py
+│
+└── examples/
+    ├── minimal_pipeline/
+    │   ├── README.md
+    │   ├── input/
+    │   └── run_example.py
+    └── e3sm_demo/
+        ├── README.md
+        └── run_e3sm_demo.py
