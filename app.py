@@ -201,7 +201,6 @@ if "last_health_ok" not in st.session_state:
 # Helpers
 # ============================================================
 @st.cache_data(ttl=60, show_spinner=False)
-@st.cache_data(ttl=60, show_spinner=False)
 def cached_check_gemini(model: str, api_key: str, timeout: int = 20) -> tuple[bool, str]:
     if not api_key:
         return False, "Missing GEMINI_API_KEY in Streamlit secrets."
@@ -1082,7 +1081,7 @@ if build_clicked:
     if not uploaded_files:
         st.error("Upload at least one scientific file.")
     elif not llm_client.is_configured():
-        st.error("OpenRouter is not configured. Add OPENROUTER_API_KEY to Streamlit secrets.")
+        st.error("Gemma 4 is not configured. Add GEMINI_API_KEY to Streamlit secrets.")
     else:
         selected_files = [f for f in uploaded_files if allowed_extension(f.name)][:file_limit]
         if not selected_files:
