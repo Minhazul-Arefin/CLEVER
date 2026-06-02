@@ -922,19 +922,20 @@ with st.sidebar:
 
     if ok:
         st.markdown(
-            f'<div class="status-pill ok-pill">Gemma 4 online<br>{GEMINI_MODEL}</div>',
+            f'<div class="status-pill ok-pill">Gemma 4 online</div>',
             unsafe_allow_html=True,
         )
     else:
         st.markdown(
-            f'<div class="status-pill warn-pill">Gemma 4 offline<br>{GEMINI_MODEL}</div>',
+            f'<div class="status-pill warn-pill">Gemma 4 offline</div>',
             unsafe_allow_html=True,
         )
         st.caption(msg)
 
-    file_limit = st.slider("Max files per run", min_value=1, max_value=20, value=3)
-    focus_hops = st.slider("Graph neighborhood hops", min_value=1, max_value=4, value=1)
-    max_nodes = st.slider("Max rendered nodes", min_value=20, max_value=500, value=180, step=20)
+
+    file_limit = 20
+	focus_hops = 10
+	max_nodes = 300
 
     st.subheader("Sci-KG Stats")
     col1, col2 = st.columns(2)
@@ -945,11 +946,11 @@ with st.sidebar:
         st.metric("Equations", summary_eqs)
         st.metric("Edges", summary_edges)
 
-    with st.expander("Debug"):
-        key = get_gemini_api_key()
-        st.caption(f"Key loaded: {bool(key)}")
-        st.caption(f"Key prefix: {key[:12] if key else 'N/A'}")
-        st.caption(f"Model: {GEMINI_MODEL}")
+    # with st.expander("Debug"):
+    #     key = get_gemini_api_key()
+    #     st.caption(f"Key loaded: {bool(key)}")
+    #     st.caption(f"Key prefix: {key[:12] if key else 'N/A'}")
+    #     st.caption(f"Model: {GEMINI_MODEL}")
 
     if st.button("Reset graph", use_container_width=True):
         st.session_state.graph_data = empty_graph()
