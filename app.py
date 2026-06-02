@@ -922,20 +922,20 @@ with st.sidebar:
 
     if ok:
         st.markdown(
-            f'<div class="status-pill ok-pill">Gemma 4 online</div>',
+            '<div class="status-pill ok-pill">Gemma 4 online</div>',
             unsafe_allow_html=True,
         )
     else:
         st.markdown(
-            f'<div class="status-pill warn-pill">Gemma 4 offline</div>',
+            '<div class="status-pill warn-pill">Gemma 4 offline</div>',
             unsafe_allow_html=True,
         )
         st.caption(msg)
 
 
     file_limit = 20
-	focus_hops = 10
-	max_nodes = 300
+    focus_hops = 10
+    max_nodes = 300
 
     st.subheader("Sci-KG Stats")
     col1, col2 = st.columns(2)
