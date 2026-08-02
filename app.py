@@ -20,7 +20,7 @@ except Exception:
 # ============================================================
 # Page config
 # ============================================================
-st.set_page_config(page_title="CLEVER", page_icon="⚛️", layout="wide")
+st.set_page_config(page_title="Auto-Sci", page_icon="⚛️", layout="wide")
 
 st.markdown(
     """
@@ -817,7 +817,7 @@ def llm_extract_file_graph(llm_client: LLMClient, system_name: str, file_name: s
         "Return only JSON. No markdown. No explanation."
     )
 
-    user_prompt = f'''Build a Scientific Knowledge Graph fragment for CLEVER from this file.
+    user_prompt = f'''Build a Scientific Knowledge Graph fragment for Auto-Sci from this file.
 
 System name: {system_name}
 File name: {file_name}
@@ -880,8 +880,8 @@ File content:
 # ============================================================
 # Header
 # ============================================================
-st.title("CLEVER")
-st.caption("Cross-module Latent Equation Variable Extraction and Recovery")
+st.title("Auto-Sci")
+# st.caption("Cross-module Latent Equation Variable Extraction and Recovery")
 
 summary_graph = st.session_state.graph_data
 summary_edges = len(summary_graph.edges)
@@ -917,7 +917,7 @@ system_name = DEFAULT_SYSTEM_NAME
 # Sidebar
 # ============================================================
 with st.sidebar:
-    st.header("CLEVER Settings")
+    st.header("Auto-Sci Settings")
 
     if ok:
         st.markdown(
@@ -988,7 +988,7 @@ with left_col:
         label_visibility="collapsed",
     )
 
-    if st.button("Ask CLEVER", use_container_width=True):
+    if st.button("Ask Auto-Sci", use_container_width=True):
         if not llm_client.is_configured():
             st.error("Gemma 4 is not configured. Add GEMINI_API_KEY to Streamlit secrets.")
         elif graph_question.strip() == "":
@@ -996,7 +996,7 @@ with left_col:
         else:
             context = graph_context_text(graph)
             system_prompt = (
-                "You are CLEVER, an agent over a Scientific Knowledge Graph (Sci-KG). "
+                "You are Auto-Sci, an agent over a Scientific Knowledge Graph (Sci-KG). "
                 "Use the graph context first. If the graph is insufficient, you may add cautious scientific reasoning and clearly mark it as added knowledge."
             )
             user_prompt = (
