@@ -2,12 +2,10 @@ import json
 import time
 from dataclasses import dataclass
 from typing import Optional
-
 import networkx as nx
 import pandas as pd
 import requests
 import streamlit as st
-
 try:
     import plotly.graph_objects as go
     PLOTLY_AVAILABLE = True
@@ -16,12 +14,10 @@ except Exception:
     PLOTLY_AVAILABLE = False
     import matplotlib.pyplot as plt
 
-
 # ============================================================
 # Page config
 # ============================================================
 st.set_page_config(page_title="Auto-Sci", page_icon="⚛️", layout="wide")
-
 st.markdown(
     """
     <style>
@@ -101,14 +97,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 # ============================================================
 # Constants
 # ============================================================
 SUPPORTED_EXTENSIONS = [
     ".f90", ".f", ".for", ".f95", ".txt", ".py", ".c", ".cpp", ".h", ".hpp", ".json", ".md"
 ]
-
 NODE_COLOR_MAP = {
     "System": "#F59E0B",
     "File": "#0F7B45",
@@ -118,7 +112,6 @@ NODE_COLOR_MAP = {
     "Constant": "#F59E0B",
     "Unknown": "#BDBDBD",
 }
-
 LOW_CONTRAST_NODE_COLOR_MAP = {
     "System": "#C9B28A",
     "File": "#6C9A7D",
@@ -128,7 +121,6 @@ LOW_CONTRAST_NODE_COLOR_MAP = {
     "Constant": "#D7A85A",
     "Unknown": "#C7CBD1",
 }
-
 ALLOWED_NODE_TYPES = {
     "System",
     "File",
@@ -137,7 +129,6 @@ ALLOWED_NODE_TYPES = {
     "Local Variable",
     "Constant",
 }
-
 ALLOWED_RELATIONS = {
     "has",
     "encodes",
@@ -147,14 +138,11 @@ ALLOWED_RELATIONS = {
     "belongs_to",
     "related_to",
 }
-
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 GEMINI_MODEL = "gemma-4-26b-a4b-it"
-
 DEFAULT_TIMEOUT_SECONDS = 90
 DEFAULT_CHUNK_SIZE = 2500
 DEFAULT_SYSTEM_NAME = "Sci-KG"
-
 
 # ============================================================
 # Secrets / env
@@ -162,7 +150,6 @@ DEFAULT_SYSTEM_NAME = "Sci-KG"
 def get_gemini_api_key() -> str:
     key = st.secrets.get("GEMINI_API_KEY", "").strip()
     return key
-
 
 # ============================================================
 # Data classes
@@ -178,7 +165,6 @@ def empty_graph() -> GraphData:
         nodes=pd.DataFrame(columns=["id", "label", "type"]),
         edges=pd.DataFrame(columns=["source", "target", "relation"]),
     )
-
 
 # ============================================================
 # Session state
@@ -196,7 +182,6 @@ if "last_health_message" not in st.session_state:
 if "last_health_ok" not in st.session_state:
     st.session_state.last_health_ok = False
 
-
 # ============================================================
 # Helpers
 # ============================================================
@@ -204,7 +189,6 @@ if "last_health_ok" not in st.session_state:
 def cached_check_gemini(model: str, api_key: str, timeout: int = 20) -> tuple[bool, str]:
     if not api_key:
         return False, "Missing GEMINI_API_KEY in Streamlit secrets."
-
     url = f"{GEMINI_BASE_URL}/models/{model}:generateContent?key={api_key}"
     payload = {
         "contents": [
@@ -213,7 +197,6 @@ def cached_check_gemini(model: str, api_key: str, timeout: int = 20) -> tuple[bo
             }
         ]
     }
-
     try:
         response = requests.post(
             url,
@@ -221,7 +204,6 @@ def cached_check_gemini(model: str, api_key: str, timeout: int = 20) -> tuple[bo
             json=payload,
             timeout=timeout,
         )
-
         if response.ok:
             data = response.json()
             candidates = data.get("candidates", [])
@@ -230,13 +212,11 @@ def cached_check_gemini(model: str, api_key: str, timeout: int = 20) -> tuple[bo
             parts = candidates[0].get("content", {}).get("parts", [])
             text = "\n".join([p.get("text", "") for p in parts if isinstance(p, dict)]).strip()
             return True, text or "OK"
-
         try:
             err = response.json()
             return False, f"{response.status_code} {err}"
         except Exception:
             return False, f"{response.status_code} {response.text}"
-
     except Exception as exc:
         return False, str(exc)
 
@@ -282,12 +262,10 @@ def canonical_node_key(label: str, node_type: str) -> tuple[str, str]:
 def validate_fragment(fragment: dict) -> dict:
     nodes = fragment.get("nodes", [])
     edges = fragment.get("edges", [])
-
     if not isinstance(nodes, list):
         nodes = []
     if not isinstance(edges, list):
         edges = []
-
     valid_nodes = []
     for node in nodes:
         if not isinstance(node, dict):
@@ -300,7 +278,6 @@ def validate_fragment(fragment: dict) -> dict:
         if node_type not in ALLOWED_NODE_TYPES:
             node_type = "Unknown"
         valid_nodes.append({"id": node_id, "label": label or node_id, "type": node_type})
-
     valid_node_ids = {node["id"] for node in valid_nodes}
     valid_edges = []
     for edge in edges:
@@ -315,46 +292,36 @@ def validate_fragment(fragment: dict) -> dict:
             relation = "related_to"
         if source in valid_node_ids and target in valid_node_ids:
             valid_edges.append({"source": source, "target": target, "relation": relation})
-
     return {"nodes": valid_nodes, "edges": valid_edges}
 
 
 def deduplicate_graph(nodes_df: pd.DataFrame, edges_df: pd.DataFrame) -> GraphData:
     if nodes_df.empty:
         return empty_graph()
-
     nodes_df = nodes_df.copy()
     edges_df = edges_df.copy()
-
     for col in ["id", "label", "type"]:
         if col not in nodes_df.columns:
             nodes_df[col] = ""
-
     nodes_df["id"] = nodes_df["id"].astype(str)
     nodes_df["label"] = nodes_df["label"].astype(str)
     nodes_df["type"] = nodes_df["type"].astype(str)
-
     extra_cols = [c for c in nodes_df.columns if c not in {"id", "label", "type"}]
-
     alias_map: dict[str, str] = {}
     canonical_rep: dict[tuple[str, str], str] = {}
     canonical_rows: list[dict] = []
-
     for _, row in nodes_df.iterrows():
         node_id = row["id"]
         label = row["label"]
         node_type = row["type"]
         key = canonical_node_key(label, node_type)
-
         if key not in canonical_rep:
             canonical_rep[key] = node_id
             new_row = {"id": node_id, "label": label, "type": node_type}
             for col in extra_cols:
                 new_row[col] = row[col]
             canonical_rows.append(new_row)
-
         alias_map[node_id] = canonical_rep[key]
-
     if edges_df.empty:
         edges_df = pd.DataFrame(columns=["source", "target", "relation"])
     else:
@@ -366,7 +333,6 @@ def deduplicate_graph(nodes_df: pd.DataFrame, edges_df: pd.DataFrame) -> GraphDa
         edges_df["relation"] = edges_df["relation"].astype(str)
         edges_df = edges_df[edges_df["source"] != edges_df["target"]]
         edges_df = edges_df.drop_duplicates()
-
     canonical_nodes_df = pd.DataFrame(canonical_rows).drop_duplicates(subset=["id"])
     return GraphData(nodes=canonical_nodes_df, edges=edges_df)
 
@@ -375,12 +341,10 @@ def normalize_fragment(fragment: dict) -> GraphData:
     fragment = validate_fragment(fragment)
     nodes = pd.DataFrame(fragment.get("nodes", []))
     edges = pd.DataFrame(fragment.get("edges", []))
-
     if nodes.empty:
         nodes = pd.DataFrame(columns=["id", "label", "type"])
     if edges.empty:
         edges = pd.DataFrame(columns=["source", "target", "relation"])
-
     return deduplicate_graph(nodes, edges)
 
 
@@ -430,7 +394,6 @@ def sample_placeholder_graph() -> GraphData:
         {"id": "v_frzmlt", "label": "frzmlt", "type": "Local Variable", "x": -0.10, "y": 4.65, "z": -0.10},
         {"id": "v_Tf", "label": "T_f", "type": "Local Variable", "x": 1.15, "y": 4.15, "z": 0.05},
     ])
-
     edges = pd.DataFrame([
         {"source": "sys_scikg", "target": "file_diff", "relation": "has"},
         {"source": "sys_scikg", "target": "file_geo", "relation": "has"},
@@ -466,7 +429,6 @@ def sample_placeholder_graph() -> GraphData:
         {"source": "eq_frzmlt", "target": "v_Tf", "relation": "hasVariable"},
         {"source": "eq_flwout", "target": "v_flwout", "relation": "hasVariable"},
     ])
-
     return deduplicate_graph(nodes, edges)
 
 
@@ -550,25 +512,19 @@ def render_3d_graph(
 ):
     if not PLOTLY_AVAILABLE or go is None:
         return None
-
     highlight_nodes = highlight_nodes or set()
     highlight_edges = highlight_edges or set()
-
     if len(graph_nx.nodes()) == 0:
         fig = go.Figure()
         fig.update_layout(height=760, margin=dict(l=0, r=0, t=10, b=0))
         return fig
-
     pos = get_graph_positions(graph_nx)
-
     ash_edge_x, ash_edge_y, ash_edge_z = [], [], []
     red_edge_x, red_edge_y, red_edge_z = [], [], []
-
     for source, target in graph_nx.edges():
         x0, y0, z0 = pos[source]
         x1, y1, z1 = pos[target]
         edge_key = tuple(sorted((source, target)))
-
         if edge_key in highlight_edges:
             red_edge_x += [x0, x1, None]
             red_edge_y += [y0, y1, None]
@@ -577,7 +533,6 @@ def render_3d_graph(
             ash_edge_x += [x0, x1, None]
             ash_edge_y += [y0, y1, None]
             ash_edge_z += [z0, z1, None]
-
     ash_edge_trace = go.Scatter3d(
         x=ash_edge_x,
         y=ash_edge_y,
@@ -587,7 +542,6 @@ def render_3d_graph(
         hoverinfo="none",
         showlegend=False,
     )
-
     red_edge_trace = go.Scatter3d(
         x=red_edge_x,
         y=red_edge_y,
@@ -597,21 +551,18 @@ def render_3d_graph(
         hoverinfo="none",
         showlegend=False,
     )
-
     xs = [p[0] for p in pos.values()]
     ys = [p[1] for p in pos.values()]
     zs = [p[2] for p in pos.values()]
     cx = sum(xs) / len(xs)
     cy = sum(ys) / len(ys)
     cz = sum(zs) / len(zs)
-
     reg_x, reg_y, reg_z = [], [], []
     reg_text, reg_colors, reg_sizes = [], [], []
     hi_x, hi_y, hi_z = [], [], []
     hi_text, hi_colors, hi_sizes = [], [], []
     label_x, label_y, label_z = [], [], []
     label_text = []
-
     for node, data in graph_nx.nodes(data=True):
         x, y, z = pos[node]
         label = data.get("label", node)
@@ -619,7 +570,6 @@ def render_3d_graph(
         hover_text = f"{label}<br>{node_type}<br>{node}"
         node_color = data.get("color", NODE_COLOR_MAP["Unknown"])
         node_size = 14 if node_type == "System" else (12 if node_type == "Equation" else 8)
-
         if node in highlight_nodes:
             hi_x.append(x)
             hi_y.append(y)
@@ -634,20 +584,17 @@ def render_3d_graph(
             reg_text.append(hover_text)
             reg_colors.append(node_color)
             reg_sizes.append(node_size)
-
         dx = x - cx
         dy = y - cy
         dz = z - cz
         norm = (dx**2 + dy**2 + dz**2) ** 0.5
         if norm == 0:
             norm = 1.0
-
         offset = 0.22 if node_type == "System" else (0.18 if node_type == "Equation" else 0.12)
         label_x.append(x + offset * dx / norm)
         label_y.append(y + offset * dy / norm)
         label_z.append(z + offset * dz / norm)
         label_text.append(label)
-
     regular_trace = go.Scatter3d(
         x=reg_x,
         y=reg_y,
@@ -663,7 +610,6 @@ def render_3d_graph(
         ),
         showlegend=False,
     )
-
     highlight_trace = go.Scatter3d(
         x=hi_x,
         y=hi_y,
@@ -679,7 +625,6 @@ def render_3d_graph(
         ),
         showlegend=False,
     )
-
     label_trace = go.Scatter3d(
         x=label_x,
         y=label_y,
@@ -690,7 +635,6 @@ def render_3d_graph(
         hoverinfo="none",
         showlegend=False,
     )
-
     fig = go.Figure(data=[ash_edge_trace, red_edge_trace, regular_trace, highlight_trace, label_trace])
     fig.update_layout(
         height=560,
@@ -712,16 +656,13 @@ def render_2d_graph(graph_nx: nx.Graph):
     ax.set_axis_off()
     if len(graph_nx.nodes()) == 0:
         return fig
-
     manual = all("pos" in data for _, data in graph_nx.nodes(data=True))
     if manual:
         pos = {node: (data["pos"][0], data["pos"][1]) for node, data in graph_nx.nodes(data=True)}
     else:
         pos = nx.spring_layout(graph_nx, seed=42)
-
     node_colors = [data.get("color", NODE_COLOR_MAP["Unknown"]) for _, data in graph_nx.nodes(data=True)]
     labels = {node: data.get("label", node) for node, data in graph_nx.nodes(data=True)}
-
     nx.draw_networkx_edges(
         graph_nx,
         pos,
@@ -734,7 +675,6 @@ def render_2d_graph(graph_nx: nx.Graph):
     nx.draw_networkx_labels(graph_nx, pos, labels=labels, ax=ax, font_size=8)
     fig.tight_layout()
     return fig
-
 
 # ============================================================
 # Gemini client
@@ -751,9 +691,7 @@ class LLMClient:
     def chat(self, system_prompt: str, user_prompt: str, response_format: Optional[dict] = None) -> str:
         if not self.is_configured():
             return "Gemini is not configured yet. Add GEMINI_API_KEY to Streamlit secrets."
-
         url = f"{GEMINI_BASE_URL}/models/{self.model}:generateContent?key={self.api_key}"
-
         payload = {
             "systemInstruction": {
                 "parts": [{"text": system_prompt}]
@@ -765,12 +703,10 @@ class LLMClient:
                 }
             ]
         }
-
         if response_format is not None and response_format.get("type") == "json_object":
             payload["generationConfig"] = {
                 "responseMimeType": "application/json"
             }
-
         last_error = None
         for attempt in range(3):
             try:
@@ -780,33 +716,27 @@ class LLMClient:
                     json=payload,
                     timeout=self.timeout,
                 )
-
                 if not response.ok:
                     try:
                         err = response.json()
                     except Exception:
                         err = response.text
                     raise RuntimeError(f"Gemini error {response.status_code}: {err}")
-
                 data = response.json()
                 candidates = data.get("candidates", [])
                 if not candidates:
                     raise ValueError(f"No candidates returned by Gemini. Response: {data}")
-
                 parts = candidates[0].get("content", {}).get("parts", [])
                 text = "\n".join([p.get("text", "") for p in parts if isinstance(p, dict)]).strip()
                 if text:
                     return text
-
                 raise ValueError(f"No text found in Gemini response: {data}")
-
             except Exception as exc:
                 last_error = exc
                 if attempt < 2:
                     time.sleep(2 * (attempt + 1))
                     continue
                 raise RuntimeError(f"Gemini request failed after retries: {last_error}") from exc
-
 
 # ============================================================
 # Sci-KG extraction
@@ -816,12 +746,9 @@ def llm_extract_file_graph(llm_client: LLMClient, system_name: str, file_name: s
         "You extract a Scientific Knowledge Graph from scientific source files. "
         "Return only JSON. No markdown. No explanation."
     )
-
     user_prompt = f'''Build a Scientific Knowledge Graph fragment for Auto-Sci from this file.
-
 System name: {system_name}
 File name: {file_name}
-
 Allowed node types:
 - System
 - File
@@ -829,7 +756,6 @@ Allowed node types:
 - Global Variable
 - Local Variable
 - Constant
-
 Allowed edge relations:
 - has
 - encodes
@@ -838,7 +764,6 @@ Allowed edge relations:
 - contains
 - belongs_to
 - related_to
-
 Return strict JSON with this schema:
 {{
   "nodes": [
@@ -848,7 +773,6 @@ Return strict JSON with this schema:
     {{"source": "node_id", "target": "node_id", "relation": "allowed relation"}}
   ]
 }}
-
 Rules:
 1. Include exactly one System node using the given system name.
 2. Include exactly one File node using the given file name.
@@ -857,11 +781,9 @@ Rules:
 5. Distinguish Global Variable vs Local Variable when reasonably inferable. If uncertain, use Local Variable.
 6. Deduplicate semantically equivalent nodes within this fragment.
 7. Do not invent unsupported facts beyond the file.
-
 File content:
 {file_text}
 '''
-
     last_error = None
     for _ in range(2):
         try:
@@ -873,22 +795,18 @@ File content:
             return safe_json_load(response)
         except Exception as exc:
             last_error = exc
-
     raise ValueError(f"Extraction failed for {file_name}: {last_error}")
-
 
 # ============================================================
 # Header
 # ============================================================
 st.title("Auto-Sci")
 # st.caption("Cross-module Latent Equation Variable Extraction and Recovery")
-
 summary_graph = st.session_state.graph_data
 summary_edges = len(summary_graph.edges)
 summary_files = 0
 summary_vars = 0
 summary_eqs = 0
-
 if not summary_graph.nodes.empty:
     summary_files = int(summary_graph.nodes[summary_graph.nodes["type"] == "File"].shape[0])
     summary_vars = int(
@@ -897,7 +815,6 @@ if not summary_graph.nodes.empty:
         ].shape[0]
     )
     summary_eqs = int(summary_graph.nodes[summary_graph.nodes["type"] == "Equation"].shape[0])
-
 ok, msg = cached_check_gemini(
     GEMINI_MODEL,
     get_gemini_api_key(),
@@ -906,19 +823,16 @@ ok, msg = cached_check_gemini(
 st.session_state.last_health_ok = ok
 st.session_state.last_health_message = msg
 
-
 # ============================================================
 # Fixed defaults
 # ============================================================
 system_name = DEFAULT_SYSTEM_NAME
-
 
 # ============================================================
 # Sidebar
 # ============================================================
 with st.sidebar:
     st.header("Auto-Sci Settings")
-
     if ok:
         st.markdown(
             '<div class="status-pill ok-pill">Gemma 4 online</div>',
@@ -929,12 +843,10 @@ with st.sidebar:
             '<div class="status-pill warn-pill">Gemma 4 offline</div>',
             unsafe_allow_html=True,
         )
-
     # Fixed internal limits — not visible in the interface
     file_limit = 20
     focus_hops = 10
     max_nodes = 300
-
     st.subheader("Files")
     uploaded_files = st.file_uploader(
         "Upload scientific files",
@@ -942,20 +854,15 @@ with st.sidebar:
         accept_multiple_files=True,
         label_visibility="collapsed",
     )
-
     build_clicked = st.button("Build Sci-KG", use_container_width=True)
-
     st.subheader("Sci-KG Stats")
     col1, col2 = st.columns(2)
-
     with col1:
         st.metric("Files", summary_files)
         st.metric("Variables", summary_vars)
-
     with col2:
         st.metric("Equations", summary_eqs)
         st.metric("Edges", summary_edges)
-
     if st.button("Reset graph", use_container_width=True):
         st.session_state.graph_data = empty_graph()
         st.session_state.processed_files = []
@@ -968,26 +875,21 @@ llm_client = LLMClient(
     api_key=get_gemini_api_key(),
 )
 
-
 # ============================================================
 # Main layout
 # ============================================================
 left_col, right_col = st.columns([0.82, 2.18], gap="small")
-
 with left_col:
     graph = st.session_state.graph_data
-
     st.subheader("Chat")
     focus_options = [""] + sorted(graph.nodes["id"].astype(str).tolist()) if not graph.nodes.empty else [""]
     focus_node = st.selectbox("Focus graph around node", options=focus_options)
-
     graph_question = st.text_area(
         "Question",
         placeholder="Ask about equations, variables, dependencies, files, or scientific meaning.",
         height=140,
         label_visibility="collapsed",
     )
-
     if st.button("Ask Auto-Sci", use_container_width=True):
         if not llm_client.is_configured():
             st.error("Gemma 4 is not configured. Add GEMINI_API_KEY to Streamlit secrets.")
@@ -995,21 +897,16 @@ with left_col:
             st.error("Enter a question first.")
         else:
             context = graph_context_text(graph)
-            system_prompt = (
-                "You are Auto-Sci, a precise equation-retrieval system.
-
+            system_prompt = """You are Auto-Sci, a precise equation-retrieval system.
 Your only task is to identify one equation that connects two
 variables requested by the user.
-
 Return only valid JSON using exactly this schema:
-
 {
   "found": true,
   "input_variable": "variable name",
   "output_variable": "variable name",
   "equation": "complete equation exactly as represented in the graph"
 }
-
 Rules:
 1. Return exactly one input variable.
 2. Return exactly one output variable.
@@ -1019,14 +916,12 @@ Rules:
 6. Do not include file names, paths, evidence lists, introductions, or conclusions.
 7. Use only the supplied Scientific Knowledge Graph.
 8. If no single equation connects the variables, return:
-
 {
   "found": false,
   "input_variable": "",
   "output_variable": "",
   "equation": ""
-}"
-            )
+}"""
             user_prompt = (
                 "Graph context:\n"
                 f"{context}\n\n"
@@ -1039,16 +934,13 @@ Rules:
                 )
             except Exception as exc:
                 st.session_state.chat_answer = f"Error: {exc}"
-
     if st.session_state.chat_answer:
         st.markdown(f'<div class="answer-box">{st.session_state.chat_answer}</div>', unsafe_allow_html=True)
 
 with right_col:
     st.subheader("Scientific Knowledge Graph")
-
     graph = st.session_state.graph_data
     show_placeholder = graph.nodes.empty
-
     if show_placeholder:
         display_graph = sample_placeholder_graph()
         graph_nx = build_nx_graph(display_graph, low_contrast=True)
@@ -1057,17 +949,14 @@ with right_col:
         display_graph = graph
         graph_nx = build_nx_graph(display_graph, low_contrast=False)
         highlight_nodes, highlight_edges = set(), set()
-
     if focus_node and not show_placeholder:
         view_graph = subgraph_by_hops(graph_nx, focus_node, hops=focus_hops)
     else:
         sample_nodes = list(graph_nx.nodes())[:max_nodes]
         view_graph = graph_nx.subgraph(sample_nodes).copy()
-
     if len(view_graph.nodes()) > max_nodes:
         trimmed_nodes = list(view_graph.nodes())[:max_nodes]
         view_graph = view_graph.subgraph(trimmed_nodes).copy()
-
     if show_placeholder:
         c1, c2, c3, c4, c5, c6 = st.columns(6)
         with c1:
@@ -1082,21 +971,18 @@ with right_col:
             st.markdown("⚫ **Edge**")
         with c6:
             st.markdown("🔴 **Path**")
-
     fig_3d = render_3d_graph(
         view_graph,
         highlight_nodes=highlight_nodes,
         highlight_edges=highlight_edges,
         placeholder_mode=show_placeholder,
     )
-
     if fig_3d is not None:
         st.plotly_chart(fig_3d, use_container_width=True, config={"displaylogo": False})
     else:
         st.info("Plotly is not installed, so the app is showing a 2D fallback graph.")
         fig_2d = render_2d_graph(view_graph)
         st.pyplot(fig_2d, use_container_width=True)
-
 
 # ============================================================
 # Build graph after UI inputs are bound
@@ -1116,14 +1002,12 @@ if build_clicked:
             progress = st.progress(0)
             status_box = st.empty()
             start_all = time.time()
-
             for idx, uploaded in enumerate(selected_files, start=1):
                 file_start = time.time()
                 try:
                     raw_text = uploaded.read().decode("utf-8", errors="ignore")
                     chunks = chunk_text(raw_text, max_chars=DEFAULT_CHUNK_SIZE)
                     merged_parts = []
-
                     for chunk_index, chunk in enumerate(chunks, start=1):
                         status_box.info(f"Processing {uploaded.name} · chunk {chunk_index}/{len(chunks)}")
                         fragment_json = llm_extract_file_graph(
@@ -1133,7 +1017,6 @@ if build_clicked:
                             file_text=chunk,
                         )
                         merged_parts.append(normalize_fragment(fragment_json))
-
                     file_graph = merge_graphs(merged_parts)
                     fragments.append(file_graph)
                     logs.append({
@@ -1153,9 +1036,7 @@ if build_clicked:
                         "seconds": round(time.time() - file_start, 2),
                         "status": f"error: {exc}",
                     })
-
                 progress.progress(idx / max(1, len(selected_files)))
-
             merged = merge_graphs([st.session_state.graph_data] + fragments)
             st.session_state.graph_data = merged
             st.session_state.processed_files = [log["file"] for log in logs if str(log["status"]).startswith("ok")]
