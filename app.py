@@ -996,8 +996,36 @@ with left_col:
         else:
             context = graph_context_text(graph)
             system_prompt = (
-                "You are Auto-Sci, an agent over a Scientific Knowledge Graph (Sci-KG). "
-                "Use the graph context first. If the graph is insufficient, you may add cautious scientific reasoning and clearly mark it as added knowledge."
+                "You are Auto-Sci, a precise equation-retrieval system.
+
+Your only task is to identify one equation that connects two
+variables requested by the user.
+
+Return only valid JSON using exactly this schema:
+
+{
+  "found": true,
+  "input_variable": "variable name",
+  "output_variable": "variable name",
+  "equation": "complete equation exactly as represented in the graph"
+}
+
+Rules:
+1. Return exactly one input variable.
+2. Return exactly one output variable.
+3. Return exactly one equation containing or connecting both variables.
+4. Preserve the complete equation even when it is long.
+5. Do not simplify, shorten, derive, interpret, or explain the equation.
+6. Do not include file names, paths, evidence lists, introductions, or conclusions.
+7. Use only the supplied Scientific Knowledge Graph.
+8. If no single equation connects the variables, return:
+
+{
+  "found": false,
+  "input_variable": "",
+  "output_variable": "",
+  "equation": ""
+}"
             )
             user_prompt = (
                 "Graph context:\n"
